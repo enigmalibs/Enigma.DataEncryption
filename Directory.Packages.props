@@ -1,0 +1,19 @@
+<Project>
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+  <!-- Library. Enigma.Core supplies every cryptographic primitive; the DI abstractions carry
+       IServiceCollection for AddEnigmaDataEncryption. System.Buffers and PolySharp are the
+       netstandard2.0-support pair and are referenced ONLY under that TFM in the library csproj. -->
+  <ItemGroup>
+    <PackageVersion Include="Enigma.Core" Version="1.0.0" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="9.0.18" />
+    <PackageVersion Include="System.Buffers" Version="4.6.1" />
+    <PackageVersion Include="PolySharp" Version="1.16.0" />
+  </ItemGroup>
+  <!-- Tests (MTP-native: xunit.v3 only; coverlet.collector for coverage). No Microsoft.NET.Test.Sdk. -->
+  <ItemGroup>
+    <PackageVersion Include="xunit.v3" Version="3.2.2" />
+    <PackageVersion Include="coverlet.collector" Version="6.0.4" />
+  </ItemGroup>
+</Project>

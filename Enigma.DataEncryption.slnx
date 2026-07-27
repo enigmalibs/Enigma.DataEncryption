@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Enigma.DataEncryption/Enigma.DataEncryption.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Enigma.DataEncryption.UnitTests/Enigma.DataEncryption.UnitTests.csproj" />
+  </Folder>
+</Solution>
