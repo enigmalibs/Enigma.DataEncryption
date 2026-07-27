@@ -4,22 +4,27 @@ Guidance for Claude Code (and other AI agents) working in this repository.
 
 ## Current state
 
-**The repository is an API skeleton: the shape is settled, the behaviour is not.** `FEATURE-67FD`
-stood up the git repo, the root configuration, the multi-targeted library and an MTP-native xUnit v3
-test project. `FEATURE-00E7` then added the normative format spec (`docs/format.md`) and the
-**complete public API surface** — enums, constants, limits, the header record, the exception
-hierarchy, five service interfaces with their implementations, the file-path extensions, the DI
-registration and the internal `IRandomSource` seam — all fully XML-documented.
+**The shape is settled; the behaviour is half filled in.** `FEATURE-67FD` stood up the git repo, the
+root configuration, the multi-targeted library and an MTP-native xUnit v3 test project. `FEATURE-00E7`
+then added the normative format spec (`docs/format.md`) and the **complete public API surface** — enums,
+constants, limits, the header record, the exception hierarchy, five service interfaces with their
+implementations, the file-path extensions, the DI registration and the internal `IRandomSource` seam —
+all fully XML-documented.
 
 `FEATURE-11B6` fills in the behaviour across five phases **without changing a single signature** — if
 you find yourself needing to, stop and reconcile the plan first. **`PHASE01` is done:** the internal
 format machinery under `Internal/` is real and tested — the header writer and reader (the reader tees
 the bytes it consumes, so the GCM associated data is definitionally what was on the wire), key
 confirmation, limit validation, cipher resolution, and the constant-time/clearing helpers.
-**`PHASE02` (next)** fills in the password-based services.
+**`PHASE02` is done:** the two password-based services work end to end, pinned by golden vectors
+computed outside this library (Python's `hashlib`/`hmac`, OpenSSL's `ARGON2ID`, the platform's
+`AesGcm`), with the payload stage and the credential handling factored into `Internal/PayloadCipher.cs`
+and `Internal/PasswordCredential.cs` for the phases that follow. **`PHASE03` (next)** fills in the RSA
+service.
 
-**The five service bodies still throw `NotImplementedException`** — the four encryption services and
-the inspector. `AddEnigmaDataEncryption()` and `RandomSource` have been real since `FEATURE-00E7`.
+**Three service bodies still throw `NotImplementedException`** — RSA, ML-KEM and the inspector — as do
+the twelve file-path extension methods. PBKDF2 and Argon2 are real, and so are
+`AddEnigmaDataEncryption()` and `RandomSource` (both since `FEATURE-00E7`).
 
 `docs/format.md` is the contract for all of it. Read it and the relevant `docs/plan/<ID>.md` before
 implementing.
@@ -95,6 +100,8 @@ src/Enigma.DataEncryption/           The library
     CipherResolver.cs                Cipher ↔ header byte, and Cipher → IBlockCipherService
     KeyConfirmation.cs               kcKey / kcTag derivation + constant-time verification
     LimitsValidator.cs               Bounds every cost/length field before any allocation or KDF work
+    PayloadCipher.cs                 The shared GCM payload stage (header as AAD) + the AEAD-failure translation
+    PasswordCredential.cs            Password validation + the char[] → UTF-8 encoding both KDF methods share
     CryptoHelpers.cs                 FixedTimeEquals + Clear(params byte[]?[])
     FormatLayout.cs                  Magic bytes + the 4 header lengths (computed, not literal)
     MLKemParameterSetWire.cs         Explicit MLKemParameterSet ↔ wire-byte mapping (never cast)
@@ -108,6 +115,9 @@ tests/Enigma.DataEncryption.UnitTests/   xUnit v3 test suite
   DependencyInjection/               AddEnigmaDataEncryption() registration tests
   Internal/                          Format-infrastructure suites (round-trip, golden bytes,
                                      truncation sweep, validation, limits, key confirmation)
+  Services/                          Password-method suites (round-trip, failure/tamper, argument
+                                     matrix, cancellation, golden vectors, key clearing) +
+                                     Fixtures/ — committed containers & expected plaintext
 docs/format.md                       Normative binary-format specification (the contract)
 docs/roadmap.md                      Work-item registry
 docs/plan/                           Per-item plans
@@ -184,6 +194,6 @@ plan's acceptance criteria are met, the roadmap/plan statuses are updated, and t
 written. Commits are left to the maintainer.
 
 The sequence is a hard dependency chain: `FEATURE-67FD` (done) → `FEATURE-00E7` (done — format spec +
-API skeleton) → **`FEATURE-11B6` (in progress: PHASE01 done, PHASE02 next)** → `FEATURE-07DA` (v1.0.0 release,
+API skeleton) → **`FEATURE-11B6` (in progress: PHASE01–PHASE02 done, PHASE03 next)** → `FEATURE-07DA` (v1.0.0 release,
 4 phases). `FEATURE-136E` (legacy decrypt) and `FEATURE-5A30` (hybrid method) are deferred by design
 and are not part of v1.0.0. `docs/roadmap.md` is authoritative for current status.

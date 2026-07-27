@@ -140,7 +140,7 @@ finding, caused by clearing outside `try/finally`. Do not repeat it.
 
 ## PHASE02 — Password-based services (PBKDF2 + Argon2)
 
-**Status:** TODO
+**Status:** DONE
 
 ### Scope
 
