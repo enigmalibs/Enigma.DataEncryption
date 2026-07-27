@@ -9,6 +9,9 @@
   <ItemGroup>
     <PackageReference Include="xunit.v3" />
     <PackageReference Include="coverlet.collector" PrivateAssets="all" />
+    <!-- Concrete DI container, for building a real ServiceProvider in the AddEnigmaDataEncryption
+         tests. Test-only: the library depends on Microsoft.Extensions.DependencyInjection.Abstractions. -->
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Enigma.DataEncryption/Enigma.DataEncryption.csproj" />

@@ -4,15 +4,22 @@ Guidance for Claude Code (and other AI agents) working in this repository.
 
 ## Current state
 
-**This repository is a bootstrap skeleton.** `FEATURE-67FD` stood up the git repo, the root
-configuration, an empty multi-targeted library and an MTP-native xUnit v3 test project with a single
-smoke test. There is **no production code yet** — `src/Enigma.DataEncryption/` contains only an
-`AssemblyInfo.cs`.
+**The repository is an API skeleton: the shape is settled, the behaviour is not.** `FEATURE-67FD`
+stood up the git repo, the root configuration, the multi-targeted library and an MTP-native xUnit v3
+test project. `FEATURE-00E7` then added the normative format spec (`docs/format.md`) and the
+**complete public API surface** — enums, constants, limits, the header record, the exception
+hierarchy, five service interfaces with their implementations, the file-path extensions, the DI
+registration and the internal `IRandomSource` seam — all fully XML-documented.
 
-Everything under *Planned architecture* below is the agreed design recorded in `docs/plan/`, not code
-that exists. Read the plan file before implementing any of it; the plan is the contract.
+**Every behavioural implementation body throws `NotImplementedException`.** The two exceptions are
+`AddEnigmaDataEncryption()` and `RandomSource`, which are real. `FEATURE-11B6` fills in the rest
+across five phases **without changing a single signature** — if you find yourself needing to, stop and
+reconcile the plan first.
 
-## What this is (planned)
+`docs/format.md` is the contract for all of it. Read it and the relevant `docs/plan/<ID>.md` before
+implementing.
+
+## What this is
 
 **Enigma.DataEncryption** is a .NET library that encrypts arbitrary data and streams into a
 **self-describing binary container** — a header carrying everything a reader needs to decrypt,
@@ -21,7 +28,7 @@ which supplies every cryptographic primitive.
 
 It is the successor to `Enigma.Cryptography.DataEncryption`.
 
-## Planned architecture
+## Architecture
 
 Four encryption **methods**, one service each, plus an inspector:
 
@@ -41,14 +48,18 @@ Every method derives or transports a 32-byte data key, then encrypts the payload
 in the header gives uniform, fast, wrong-credential detection before a single payload byte is read,
 and makes the construction key-committing (plain GCM is not).
 
-The normative binary format will live in `docs/format.md` (`FEATURE-00E7`). **It is the contract** —
-code and spec must agree on every offset, size and constant.
+The normative binary format is `docs/format.md`. **It is the contract** — code and spec must agree on
+every offset, size and constant. `tests/…/Api/FormatConstantsTests.cs` enforces that agreement for the
+constants and the four header lengths; keep both sides in step when either changes.
 
 **Load-bearing invariant — BouncyCastle never leaks onto the public surface.** BouncyCastle backs
 Enigma.Core, which backs this library, but no `Org.BouncyCastle.*` type may appear on any exported
-type or member. `FEATURE-00E7` adds a reflection guard test
+type or member. The reflection guard
 (`tests/Enigma.DataEncryption.UnitTests/Api/BouncyCastleIsolationTests.cs`, modelled on Enigma.Core's)
-that walks every exported type and fails the build on a violation. Keep it green.
+walks every exported type and fails the build on a violation. Keep it green.
+
+**Watch the ML-KEM parameter-set byte.** Enigma.Core's `MLKemParameterSet` is an unnumbered enum
+(`0`/`1`/`2`), but the header bytes are `0x01`/`0x02`/`0x03`. Map explicitly — never cast.
 
 **Async / progress / cancellation.** Every operation is `async`, taking an optional
 `IProgress<int>` (payload bytes processed — header bytes are not counted) and a `CancellationToken`.
@@ -63,13 +74,31 @@ Directory.Packages.props             Central Package Management (all package ver
 global.json                          SDK 10.0.100 (latestFeature); test runner = Microsoft.Testing.Platform
 README.md, RELEASENOTES.md           Empty — written at release time (FEATURE-07DA)
 src/Enigma.DataEncryption/           The library
+  Cipher.cs                          enum Cipher : byte            (0x01–0x04)
+  EncryptionMethod.cs                enum EncryptionMethod : byte  (0x01–0x04; 0x05 reserved)
+  DataEncryptionDefaults.cs          Format version, fixed sizes, default KDF costs
+  DataEncryptionLimits.cs            Header-field upper bounds (+ the shared Default)
+  EncryptedDataHeader.cs             Parsed header record returned by the inspector
+  DataEncryptionFileExtensions.cs    File-path wrappers (12 extension methods)
+  ServiceCollectionExtensions.cs     AddEnigmaDataEncryption() — ns Microsoft.Extensions.DependencyInjection
+  Exceptions/                        DataEncryptionException + Format/Decryption subclasses
+  Services/                          The 4 encryption services + the inspector (interface + impl)
+  Internal/                          IRandomSource / RandomSource — internal RNG seam
   Properties/AssemblyInfo.cs         InternalsVisibleTo for the test assembly
 tests/Enigma.DataEncryption.UnitTests/   xUnit v3 test suite
   SmokeTest.cs                       Toolchain smoke test
+  Api/BouncyCastleIsolationTests.cs  Public-surface guard (the load-bearing invariant)
+  Api/FormatConstantsTests.cs        Pins the wire constants against docs/format.md
+  DependencyInjection/               AddEnigmaDataEncryption() registration tests
+docs/format.md                       Normative binary-format specification (the contract)
 docs/roadmap.md                      Work-item registry
 docs/plan/                           Per-item plans
 docs/done/                           Per-dev completion records
 ```
+
+Note the folders under `src/` are **organisational only** — every public type lives in the flat
+`Enigma.DataEncryption` namespace (the DI extension excepted), so callers need one `using`. Internal
+helpers are in `Enigma.DataEncryption.Internal`.
 
 There is **no CI workflow**, deliberately — consistent with Enigma.Core and the predecessor. There is
 no UI or CLI project, now or ever.
@@ -86,6 +115,9 @@ no UI or CLI project, now or ever.
   **netstandard2.0 only** — referencing `System.Buffers` on net8.0+ raises NU1510 and fails the
   zero-warnings build. PolySharp is what makes `init`/`required` members and the nullable-analysis
   attributes available on netstandard2.0.
+- **Test-only:** `xunit.v3`, `coverlet.collector`, and **Microsoft.Extensions.DependencyInjection
+  9.0.18** — the concrete container, needed to build a real `ServiceProvider` in the DI tests. The
+  library depends on the *Abstractions* alone; this reference must never migrate into it.
 - All versions are managed centrally in `Directory.Packages.props` — never put `Version=` on a
   `<PackageReference>`.
 
@@ -133,7 +165,7 @@ Each unit of work gets its own branch (`feature/…`, `bugfix/…`, `review/…`
 plan's acceptance criteria are met, the roadmap/plan statuses are updated, and the completion doc is
 written. Commits are left to the maintainer.
 
-The planned sequence is a hard dependency chain: `FEATURE-67FD` → `FEATURE-00E7` (format spec + API
-skeleton) → `FEATURE-11B6` (implementation, 5 phases) → `FEATURE-07DA` (v1.0.0 release, 4 phases).
-`FEATURE-136E` (legacy decrypt) and `FEATURE-5A30` (hybrid method) are deferred by design and are not
-part of v1.0.0.
+The sequence is a hard dependency chain: `FEATURE-67FD` (done) → `FEATURE-00E7` (done — format spec +
+API skeleton) → **`FEATURE-11B6` (next: implementation, 5 phases)** → `FEATURE-07DA` (v1.0.0 release,
+4 phases). `FEATURE-136E` (legacy decrypt) and `FEATURE-5A30` (hybrid method) are deferred by design
+and are not part of v1.0.0. `docs/roadmap.md` is authoritative for current status.
