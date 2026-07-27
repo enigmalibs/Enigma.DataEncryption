@@ -9,8 +9,8 @@ Status vocabulary: `TODO`, `IN PROGRESS`, `DONE`, `ABANDONED`.
 |--------------|------------------------------------------------------------|--------|---------------------------|
 | FEATURE-67FD | Repository & solution bootstrap                            | DONE   | docs/plan/FEATURE-67FD.md |
 | FEATURE-00E7 | Binary format spec & public abstraction skeleton           | DONE   | docs/plan/FEATURE-00E7.md |
-| FEATURE-11B6 | Core implementation                                        | TODO   | docs/plan/FEATURE-11B6.md |
-| - PHASE01    | Shared format infrastructure                               | TODO   | (in FEATURE-11B6.md)      |
+| FEATURE-11B6 | Core implementation                                        | IN PROGRESS | docs/plan/FEATURE-11B6.md |
+| - PHASE01    | Shared format infrastructure                               | DONE   | (in FEATURE-11B6.md)      |
 | - PHASE02    | Password-based services (PBKDF2 + Argon2)                  | TODO   | (in FEATURE-11B6.md)      |
 | - PHASE03    | RSA service                                                | TODO   | (in FEATURE-11B6.md)      |
 | - PHASE04    | ML-KEM service                                             | TODO   | (in FEATURE-11B6.md)      |

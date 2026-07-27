@@ -11,10 +11,15 @@ test project. `FEATURE-00E7` then added the normative format spec (`docs/format.
 hierarchy, five service interfaces with their implementations, the file-path extensions, the DI
 registration and the internal `IRandomSource` seam — all fully XML-documented.
 
-**Every behavioural implementation body throws `NotImplementedException`.** The two exceptions are
-`AddEnigmaDataEncryption()` and `RandomSource`, which are real. `FEATURE-11B6` fills in the rest
-across five phases **without changing a single signature** — if you find yourself needing to, stop and
-reconcile the plan first.
+`FEATURE-11B6` fills in the behaviour across five phases **without changing a single signature** — if
+you find yourself needing to, stop and reconcile the plan first. **`PHASE01` is done:** the internal
+format machinery under `Internal/` is real and tested — the header writer and reader (the reader tees
+the bytes it consumes, so the GCM associated data is definitionally what was on the wire), key
+confirmation, limit validation, cipher resolution, and the constant-time/clearing helpers.
+**`PHASE02` (next)** fills in the password-based services.
+
+**The five service bodies still throw `NotImplementedException`** — the four encryption services and
+the inspector. `AddEnigmaDataEncryption()` and `RandomSource` have been real since `FEATURE-00E7`.
 
 `docs/format.md` is the contract for all of it. Read it and the relevant `docs/plan/<ID>.md` before
 implementing.
@@ -83,13 +88,26 @@ src/Enigma.DataEncryption/           The library
   ServiceCollectionExtensions.cs     AddEnigmaDataEncryption() — ns Microsoft.Extensions.DependencyInjection
   Exceptions/                        DataEncryptionException + Format/Decryption subclasses
   Services/                          The 4 encryption services + the inspector (interface + impl)
-  Internal/                          IRandomSource / RandomSource — internal RNG seam
+  Internal/                          The format machinery (all internal — see below)
+    HeaderWriter.cs                  Builds, tags, writes and returns each of the 4 header shapes
+    HeaderReader.cs                  Parses a header, tee-ing the AAD; translates Enigma.Core's stream failures
+    ParsedHeader.cs                  Reader result: public header + raw AAD + method-specific key material
+    CipherResolver.cs                Cipher ↔ header byte, and Cipher → IBlockCipherService
+    KeyConfirmation.cs               kcKey / kcTag derivation + constant-time verification
+    LimitsValidator.cs               Bounds every cost/length field before any allocation or KDF work
+    CryptoHelpers.cs                 FixedTimeEquals + Clear(params byte[]?[])
+    FormatLayout.cs                  Magic bytes + the 4 header lengths (computed, not literal)
+    MLKemParameterSetWire.cs         Explicit MLKemParameterSet ↔ wire-byte mapping (never cast)
+    IRandomSource.cs / RandomSource.cs   Internal RNG seam
   Properties/AssemblyInfo.cs         InternalsVisibleTo for the test assembly
 tests/Enigma.DataEncryption.UnitTests/   xUnit v3 test suite
   SmokeTest.cs                       Toolchain smoke test
   Api/BouncyCastleIsolationTests.cs  Public-surface guard (the load-bearing invariant)
+  Api/InternalSurfaceIsolationTests.cs  Guard: no Internal/ type is exported
   Api/FormatConstantsTests.cs        Pins the wire constants against docs/format.md
   DependencyInjection/               AddEnigmaDataEncryption() registration tests
+  Internal/                          Format-infrastructure suites (round-trip, golden bytes,
+                                     truncation sweep, validation, limits, key confirmation)
 docs/format.md                       Normative binary-format specification (the contract)
 docs/roadmap.md                      Work-item registry
 docs/plan/                           Per-item plans
@@ -166,6 +184,6 @@ plan's acceptance criteria are met, the roadmap/plan statuses are updated, and t
 written. Commits are left to the maintainer.
 
 The sequence is a hard dependency chain: `FEATURE-67FD` (done) → `FEATURE-00E7` (done — format spec +
-API skeleton) → **`FEATURE-11B6` (next: implementation, 5 phases)** → `FEATURE-07DA` (v1.0.0 release,
+API skeleton) → **`FEATURE-11B6` (in progress: PHASE01 done, PHASE02 next)** → `FEATURE-07DA` (v1.0.0 release,
 4 phases). `FEATURE-136E` (legacy decrypt) and `FEATURE-5A30` (hybrid method) are deferred by design
 and are not part of v1.0.0. `docs/roadmap.md` is authoritative for current status.

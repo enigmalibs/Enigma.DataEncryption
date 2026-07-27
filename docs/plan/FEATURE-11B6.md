@@ -1,6 +1,6 @@
 # FEATURE-11B6 — Core implementation
 
-**Status:** TODO
+**Status:** IN PROGRESS
 **Type:** FEATURE (5 phases)
 **Depends on:** FEATURE-00E7
 
@@ -32,7 +32,7 @@ meaningful.
 
 ## PHASE01 — Shared format infrastructure
 
-**Status:** TODO
+**Status:** DONE
 
 ### Scope
 
