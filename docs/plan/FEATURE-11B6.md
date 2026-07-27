@@ -212,7 +212,7 @@ any work.
 
 ## PHASE03 — RSA service
 
-**Status:** TODO
+**Status:** DONE
 
 ### Scope
 

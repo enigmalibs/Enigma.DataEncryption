@@ -399,12 +399,22 @@ The exception a reader raises is part of the contract.
 | Stream ends inside the header | `DataEncryptionFormatException` |
 | A cost or length field exceeds `DataEncryptionLimits`, or is `<= 0` | `DataEncryptionFormatException` |
 | `Enigma.Core` `ReadLengthValue*` `InvalidOperationException` | translated to `DataEncryptionFormatException` |
+| RSA wrapped key that unwraps to a length other than 32 bytes | `DataEncryptionFormatException` |
 | Key-confirmation tag mismatch | `DataDecryptionException` |
 | GCM authentication failure (`CryptographicException`) | `DataDecryptionException`, wrapping it |
-| RSA OAEP unwrap failure (`CryptographicException`) | `DataDecryptionException`, wrapping it |
-| Malformed / undecryptable private-key PEM | propagates from Enigma.Core (`ArgumentException` / `CryptographicException`) — **not** wrapped, since it is a credential-supply error, not a file-content error |
+| RSA OAEP unwrap failure, **including an undecryptable private-key PEM** (`CryptographicException`) | `DataDecryptionException`, wrapping it |
+| Malformed / unparseable private-key PEM | propagates from Enigma.Core (`ArgumentException` / `FormatException`) — **not** wrapped, since it is a credential-supply error, not a file-content error |
 | Null / empty / out-of-range arguments | `ArgumentNullException` / `ArgumentException` / `ArgumentOutOfRangeException` |
 | Cancellation | `OperationCanceledException` |
+
+> **Why an undecryptable private-key PEM is not separated out.** Enigma.Core reports a wrong RSA private
+> key, an encrypted PEM opened with the wrong passphrase, and an encrypted PEM opened with no passphrase
+> as the *same* `CryptographicException` from the *same* `DecryptOaep` call, and their BouncyCastle inner
+> exception types overlap — nothing but the message text distinguishes them. Rather than match on message
+> text, all three are reported as `DataDecryptionException` with the original exception kept as
+> `InnerException`, where the specific cause stays readable. A PEM that cannot be *parsed* does keep its
+> own identity, because `ArgumentException` and `FormatException` are unambiguous. The credential-supply
+> versus file-content split therefore holds wherever the underlying library lets it be observed.
 
 `DataEncryptionFormatException` and `DataDecryptionException` both derive from
 `DataEncryptionException`, so a caller that does not care which can catch the base type.

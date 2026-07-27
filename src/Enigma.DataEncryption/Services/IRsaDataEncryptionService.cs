@@ -91,9 +91,9 @@ public interface IRsaDataEncryptionService
     /// <paramref name="privateKeyPem"/> and <paramref name="keyPassword"/> are not.
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="input"/>, <paramref name="output"/> or <paramref name="privateKeyPem"/> is <see langword="null"/>.</exception>
-    /// <exception cref="ArgumentException"><paramref name="privateKeyPem"/> is empty, or is not a readable RSA private-key PEM. A malformed or undecryptable PEM is a credential-supply error and propagates from Enigma.Core unwrapped.</exception>
-    /// <exception cref="DataEncryptionFormatException">The header is not a valid RSA container, or the wrapped-key length is out of bounds.</exception>
-    /// <exception cref="DataDecryptionException">The private key does not match the container (OAEP unwrap failure or key-confirmation mismatch), or the payload fails authentication.</exception>
+    /// <exception cref="ArgumentException"><paramref name="privateKeyPem"/> is empty, or is not a readable RSA private-key PEM. A PEM that cannot be parsed is a credential-supply error and propagates from Enigma.Core unwrapped — as <see cref="ArgumentException"/>, or as <see cref="FormatException"/> where its Base64 is invalid.</exception>
+    /// <exception cref="DataEncryptionFormatException">The header is not a valid RSA container, the wrapped-key length is out of bounds, or the wrapped key does not hold a 32-byte data key.</exception>
+    /// <exception cref="DataDecryptionException">The private key does not open the container — an OAEP unwrap failure (which is also how an encrypted PEM supplied with the wrong or no passphrase surfaces, the underlying exception kept as <see cref="System.Exception.InnerException"/>) or a key-confirmation mismatch — or the payload fails authentication.</exception>
     /// <exception cref="OperationCanceledException">The operation was cancelled.</exception>
     Task DecryptAsync(
         Stream input,

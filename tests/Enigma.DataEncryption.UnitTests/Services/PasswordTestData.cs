@@ -38,16 +38,7 @@ internal static class PasswordTestData
     /// <summary>A deterministic plaintext of the requested length.</summary>
     /// <param name="length">How many bytes.</param>
     /// <returns>The plaintext bytes.</returns>
-    internal static byte[] Plaintext(int length = 512)
-    {
-        byte[] plaintext = new byte[length];
-        for (int i = 0; i < length; i++)
-        {
-            plaintext[i] = PatternStream.ByteAt(i);
-        }
-
-        return plaintext;
-    }
+    internal static byte[] Plaintext(int length = 512) => ContainerFixtures.Plaintext(length);
 
     /// <summary>An adapter whose salt and nonce are the fixed ones, so its output is reproducible.</summary>
     /// <param name="method">Which method to drive.</param>
@@ -94,6 +85,5 @@ internal static class PasswordTestData
     /// <summary>Reads a committed fixture file from beside the test assembly.</summary>
     /// <param name="fileName">The file's name within <c>Services/Fixtures</c>.</param>
     /// <returns>The file's bytes.</returns>
-    internal static byte[] Fixture(string fileName) =>
-        File.ReadAllBytes(Path.Combine("Services", "Fixtures", fileName));
+    internal static byte[] Fixture(string fileName) => ContainerFixtures.Read(fileName);
 }

@@ -19,12 +19,20 @@ confirmation, limit validation, cipher resolution, and the constant-time/clearin
 **`PHASE02` is done:** the two password-based services work end to end, pinned by golden vectors
 computed outside this library (Python's `hashlib`/`hmac`, OpenSSL's `ARGON2ID`, the platform's
 `AesGcm`), with the payload stage and the credential handling factored into `Internal/PayloadCipher.cs`
-and `Internal/PasswordCredential.cs` for the phases that follow. **`PHASE03` (next)** fills in the RSA
-service.
+and `Internal/PasswordCredential.cs` for the phases that follow. **`PHASE03` is done:** the RSA service
+transports its data key under RSAES-OAEP-SHA256, with golden vectors that pin every byte OAEP's own
+randomness allows (the wrapped key is the exception, and the suite says so) and committed PEM fixtures for
+the read path. **`PHASE04` (next)** fills in the ML-KEM service.
 
-**Three service bodies still throw `NotImplementedException`** — RSA, ML-KEM and the inspector — as do
-the twelve file-path extension methods. PBKDF2 and Argon2 are real, and so are
+**Two service bodies still throw `NotImplementedException`** — ML-KEM and the inspector — as do the
+twelve file-path extension methods. PBKDF2, Argon2 and RSA are real, and so are
 `AddEnigmaDataEncryption()` and `RandomSource` (both since `FEATURE-00E7`).
+
+One thing PHASE03 settled that matters beyond it: **Enigma.Core reports a wrong RSA private key and an
+undecryptable private-key PEM identically**, so `docs/format.md` §9 now wraps both as
+`DataDecryptionException` (cause preserved as `InnerException`) and reserves the propagate-unwrapped rule
+for PEMs that cannot be *parsed* (`ArgumentException` / `FormatException`). Do not try to re-split them by
+message text.
 
 `docs/format.md` is the contract for all of it. Read it and the relevant `docs/plan/<ID>.md` before
 implementing.
@@ -194,6 +202,6 @@ plan's acceptance criteria are met, the roadmap/plan statuses are updated, and t
 written. Commits are left to the maintainer.
 
 The sequence is a hard dependency chain: `FEATURE-67FD` (done) → `FEATURE-00E7` (done — format spec +
-API skeleton) → **`FEATURE-11B6` (in progress: PHASE01–PHASE02 done, PHASE03 next)** → `FEATURE-07DA` (v1.0.0 release,
+API skeleton) → **`FEATURE-11B6` (in progress: PHASE01–PHASE03 done, PHASE04 next)** → `FEATURE-07DA` (v1.0.0 release,
 4 phases). `FEATURE-136E` (legacy decrypt) and `FEATURE-5A30` (hybrid method) are deferred by design
 and are not part of v1.0.0. `docs/roadmap.md` is authoritative for current status.

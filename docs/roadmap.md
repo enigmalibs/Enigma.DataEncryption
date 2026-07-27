@@ -12,7 +12,7 @@ Status vocabulary: `TODO`, `IN PROGRESS`, `DONE`, `ABANDONED`.
 | FEATURE-11B6 | Core implementation                                        | IN PROGRESS | docs/plan/FEATURE-11B6.md |
 | - PHASE01    | Shared format infrastructure                               | DONE   | (in FEATURE-11B6.md)      |
 | - PHASE02    | Password-based services (PBKDF2 + Argon2)                  | DONE   | (in FEATURE-11B6.md)      |
-| - PHASE03    | RSA service                                                | TODO   | (in FEATURE-11B6.md)      |
+| - PHASE03    | RSA service                                                | DONE   | (in FEATURE-11B6.md)      |
 | - PHASE04    | ML-KEM service                                             | TODO   | (in FEATURE-11B6.md)      |
 | - PHASE05    | Inspector, file extensions, DI & robustness suites          | TODO   | (in FEATURE-11B6.md)      |
 | FEATURE-07DA | NuGet release preparation (v1.0.0)                         | TODO   | docs/plan/FEATURE-07DA.md |

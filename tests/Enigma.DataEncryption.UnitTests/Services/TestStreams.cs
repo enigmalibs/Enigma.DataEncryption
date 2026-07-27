@@ -236,6 +236,61 @@ internal sealed class PatternVerifyingStream : Stream
 }
 
 /// <summary>
+/// A write-only sink that counts, and calls back the first time a byte is written past the header.
+/// </summary>
+/// <remarks>
+/// This is how "the payload streams" is observed: the callback fires while the input stream still has
+/// bytes to give, which an implementation that buffered the whole payload could not manage.
+/// </remarks>
+/// <param name="headerLength">How many leading bytes belong to the header.</param>
+/// <param name="onFirstPayloadWrite">Invoked once, on the first write past the header.</param>
+internal sealed class CountingSink(int headerLength, Action onFirstPayloadWrite) : Stream
+{
+    private long _written;
+    private bool _notified;
+
+    public override bool CanRead => false;
+
+    public override bool CanSeek => false;
+
+    public override bool CanWrite => true;
+
+    public override long Length => _written;
+
+    public override long Position
+    {
+        get => _written;
+        set => throw new NotSupportedException();
+    }
+
+    public override void Write(byte[] buffer, int offset, int count)
+    {
+        _written += count;
+        if (!_notified && _written > headerLength)
+        {
+            _notified = true;
+            onFirstPayloadWrite();
+        }
+    }
+
+    public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+    {
+        Write(buffer, offset, count);
+        return Task.CompletedTask;
+    }
+
+    public override void Flush()
+    {
+    }
+
+    public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+    public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+    public override void SetLength(long value) => throw new NotSupportedException();
+}
+
+/// <summary>
 /// A read-through wrapper that cancels a token once <paramref name="threshold"/> bytes have been read.
 /// </summary>
 /// <remarks>
