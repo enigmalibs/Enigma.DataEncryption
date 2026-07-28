@@ -13,7 +13,7 @@ using Enigma.DataEncryption.Internal;
 namespace Enigma.DataEncryption.UnitTests.Services;
 
 /// <summary>
-/// One uniform surface over all four encryption methods — streams, file paths and a wrong credential —
+/// One uniform surface over all five encryption methods — streams, file paths and a wrong credential —
 /// so the cross-cutting suites can be written once and generated over every method.
 /// </summary>
 /// <remarks>
@@ -54,9 +54,19 @@ internal abstract class ContainerMethodHarness
     /// <summary>The ML-KEM parameter set the harness encapsulates under — the smallest, so the containers are too.</summary>
     internal const MLKemParameterSet KemParameterSet = MLKemParameterSet.MLKem512;
 
-    /// <summary>All four methods, for the theories that sweep them.</summary>
+    /// <summary>All five methods, for the theories that sweep them.</summary>
     internal static ContainerMethodKind[] All =>
-        [ContainerMethodKind.Pbkdf2, ContainerMethodKind.Argon2, ContainerMethodKind.Rsa, ContainerMethodKind.MLKem];
+    [
+        ContainerMethodKind.Pbkdf2, ContainerMethodKind.Argon2, ContainerMethodKind.Rsa,
+        ContainerMethodKind.MLKem, ContainerMethodKind.Hybrid,
+    ];
+
+    /// <summary>
+    /// The methods whose header carries an ML-KEM parameter-set byte at offset 5, for the sweeps that
+    /// corrupt it.
+    /// </summary>
+    internal static ContainerMethodKind[] WithParameterSetByte =>
+        [ContainerMethodKind.MLKem, ContainerMethodKind.Hybrid];
 
     /// <summary>All four ciphers, for the theories that sweep them.</summary>
     internal static Cipher[] AllCiphers =>
@@ -87,6 +97,7 @@ internal abstract class ContainerMethodHarness
         ContainerMethodKind.Pbkdf2 => new Pbkdf2Harness(),
         ContainerMethodKind.Argon2 => new Argon2Harness(),
         ContainerMethodKind.Rsa => new RsaHarness(),
+        ContainerMethodKind.Hybrid => new HybridHarness(),
         _ => new MLKemHarness(),
     };
 
@@ -95,12 +106,13 @@ internal abstract class ContainerMethodHarness
     /// enumerated synchronously at discovery time.
     /// </summary>
     /// <param name="kind">The method.</param>
-    /// <returns>53, 61, 293 or 806.</returns>
+    /// <returns>53, 61, 294, 806 or 1,066.</returns>
     internal static int HeaderLengthOf(ContainerMethodKind kind) => kind switch
     {
         ContainerMethodKind.Pbkdf2 => FormatLayout.Pbkdf2HeaderLength,
         ContainerMethodKind.Argon2 => FormatLayout.Argon2HeaderLength,
         ContainerMethodKind.Rsa => RsaTestData.HeaderLength2048,
+        ContainerMethodKind.Hybrid => HybridTestData.HeaderLengthOf(KemParameterSet),
         _ => MLKemTestData.HeaderLengthOf(KemParameterSet),
     };
 
@@ -112,6 +124,7 @@ internal abstract class ContainerMethodHarness
         ContainerMethodKind.Pbkdf2 => (byte)EncryptionMethod.Pbkdf2,
         ContainerMethodKind.Argon2 => (byte)EncryptionMethod.Argon2,
         ContainerMethodKind.Rsa => (byte)EncryptionMethod.Rsa,
+        ContainerMethodKind.Hybrid => (byte)EncryptionMethod.Hybrid,
         _ => (byte)EncryptionMethod.MLKem,
     };
 
@@ -156,6 +169,12 @@ internal abstract class ContainerMethodHarness
     /// <see cref="DataDecryptionException"/> alongside a wrong key, because Enigma.Core reports them
     /// identically); and a freshly generated, unrelated key pair for ML-KEM — the case FIPS 203 implicit
     /// rejection lets <i>succeed</i> at decapsulation, so only the key-confirmation tag catches it.
+    /// <para>
+    /// For the hybrid it is the <b>right RSA key and a wrong ML-KEM key</b>. That is the pointed choice of
+    /// the two available: the RSA half unwraps cleanly, decapsulation succeeds under implicit rejection,
+    /// and the container is nevertheless refused — so the failure can only have come from the combined key
+    /// the confirmation tag covers.
+    /// </para>
     /// </remarks>
     internal abstract Task DecryptWithWrongCredentialAsync(Stream input, Stream output);
 
@@ -393,7 +412,8 @@ internal abstract class ContainerMethodHarness
             IProgress<int>? progress = null,
             CancellationToken cancellationToken = default) =>
             _service.EncryptAsync(
-                input, output, cipher, RsaTestData.GoldenPublicKeyPem(), progress, cancellationToken);
+                input, output, cipher, RsaTestData.GoldenPublicKeyPem(), RsaOaepHash.Sha256, progress,
+                cancellationToken);
 
         internal override Task DecryptAsync(
             Stream input,
@@ -415,7 +435,8 @@ internal abstract class ContainerMethodHarness
             IProgress<int>? progress = null,
             CancellationToken cancellationToken = default) =>
             _service.EncryptFileAsync(
-                inputPath, outputPath, cipher, RsaTestData.GoldenPublicKeyPem(), progress, cancellationToken);
+                inputPath, outputPath, cipher, RsaTestData.GoldenPublicKeyPem(), RsaOaepHash.Sha256, progress,
+                cancellationToken);
 
         internal override Task DecryptFileAsync(
             string inputPath,
@@ -501,5 +522,85 @@ internal abstract class ContainerMethodHarness
 
         internal override Task DecryptFileWithEmptyCredentialAsync(string inputPath, string outputPath) =>
             _service.DecryptFileAsync(inputPath, outputPath, Array.Empty<byte>());
+    }
+
+    private sealed class HybridHarness : ContainerMethodHarness
+    {
+        private readonly IHybridDataEncryptionService _service = new HybridDataEncryptionService(
+            new BlockCipherServiceFactory(), new PublicKeyServiceFactory(), new MLKemServiceFactory(),
+            new HmacServiceFactory());
+
+        // The wrong credential for this method is a wrong ML-KEM key alongside the right RSA one — see
+        // DecryptWithWrongCredentialAsync's remarks on why that is the pointed half to get wrong.
+        private readonly byte[] _unrelatedMLKemPrivateKey =
+            new MLKemServiceFactory().CreateMLKemService(KemParameterSet).GenerateKeyPair().privateKey;
+
+        internal override ContainerMethodKind Kind => ContainerMethodKind.Hybrid;
+
+        internal override EncryptionMethod Method => EncryptionMethod.Hybrid;
+
+        internal override int HeaderLength => HybridTestData.HeaderLengthOf(KemParameterSet);
+
+        // Two Int32 fields, which no other method has. The second one's offset depends on the first
+        // field's value, so it is computed rather than written down.
+        internal override IReadOnlyList<Int32HeaderField> Int32Fields =>
+        [
+            new("RSA wrapped-key length", HybridTestData.WrappedSecretLengthOffset,
+                DataEncryptionLimits.Default.MaxWrappedKeyLength),
+            new("ML-KEM encapsulation length",
+                HybridTestData.EncapsulationLengthOffset(HybridTestData.WrappedSecretLength2048),
+                DataEncryptionLimits.Default.MaxEncapsulationLength),
+        ];
+
+        internal override Task EncryptAsync(
+            Stream input,
+            Stream output,
+            Cipher cipher = Cipher.Aes256Gcm,
+            IProgress<int>? progress = null,
+            CancellationToken cancellationToken = default) =>
+            _service.EncryptAsync(
+                input, output, cipher, RsaTestData.GoldenPublicKeyPem(),
+                MLKemTestData.GoldenPublicKey("512"), KemParameterSet, progress, cancellationToken);
+
+        internal override Task DecryptAsync(
+            Stream input,
+            Stream output,
+            DataEncryptionLimits? limits = null,
+            IProgress<int>? progress = null,
+            CancellationToken cancellationToken = default) =>
+            _service.DecryptAsync(
+                input, output, RsaTestData.GoldenPrivateKeyPem(), MLKemTestData.GoldenPrivateKey("512"),
+                null, limits, progress, cancellationToken);
+
+        internal override Task DecryptWithWrongCredentialAsync(Stream input, Stream output) =>
+            _service.DecryptAsync(
+                input, output, RsaTestData.GoldenPrivateKeyPem(), _unrelatedMLKemPrivateKey);
+
+        internal override Task EncryptFileAsync(
+            string inputPath,
+            string outputPath,
+            Cipher cipher = Cipher.Aes256Gcm,
+            IProgress<int>? progress = null,
+            CancellationToken cancellationToken = default) =>
+            _service.EncryptFileAsync(
+                inputPath, outputPath, cipher, RsaTestData.GoldenPublicKeyPem(),
+                MLKemTestData.GoldenPublicKey("512"), KemParameterSet, progress, cancellationToken);
+
+        internal override Task DecryptFileAsync(
+            string inputPath,
+            string outputPath,
+            IProgress<int>? progress = null,
+            CancellationToken cancellationToken = default) =>
+            _service.DecryptFileAsync(
+                inputPath, outputPath, RsaTestData.GoldenPrivateKeyPem(),
+                MLKemTestData.GoldenPrivateKey("512"), null, null, progress, cancellationToken);
+
+        internal override Task DecryptFileWithWrongCredentialAsync(string inputPath, string outputPath) =>
+            _service.DecryptFileAsync(
+                inputPath, outputPath, RsaTestData.GoldenPrivateKeyPem(), _unrelatedMLKemPrivateKey);
+
+        internal override Task DecryptFileWithEmptyCredentialAsync(string inputPath, string outputPath) =>
+            _service.DecryptFileAsync(
+                inputPath, outputPath, string.Empty, MLKemTestData.GoldenPrivateKey("512"));
     }
 }

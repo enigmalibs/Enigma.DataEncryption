@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
+using Enigma.Core.Asymmetric.PublicKey;
 using Xunit;
 
 namespace Enigma.DataEncryption.UnitTests.Services;
@@ -34,7 +35,7 @@ public sealed class RsaCancellationTests(RsaKeyFixture keys)
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => service.EncryptAsync(
-                input, output, Cipher.Aes256Gcm, keys.PublicKeyPem, null, cancelled.Token));
+                input, output, Cipher.Aes256Gcm, keys.PublicKeyPem, RsaOaepHash.Sha256, null, cancelled.Token));
 
         Assert.Equal(0, output.Length);
     }
@@ -81,7 +82,8 @@ public sealed class RsaCancellationTests(RsaKeyFixture keys)
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => RsaTestData.Service().EncryptAsync(
-                input, output, Cipher.Aes256Gcm, keys.PublicKeyPem, null, cancelAfterFirstChunks.Token));
+                input, output, Cipher.Aes256Gcm, keys.PublicKeyPem, RsaOaepHash.Sha256, null,
+                cancelAfterFirstChunks.Token));
 
         // It stopped early — the whole payload was never consumed.
         Assert.True(
@@ -98,7 +100,8 @@ public sealed class RsaCancellationTests(RsaKeyFixture keys)
         using PatternStream plaintext = new(size);
         using MemoryStream container = new();
         await service.EncryptAsync(
-            plaintext, container, Cipher.Aes256Gcm, keys.PublicKeyPem, null, TestContext.Current.CancellationToken);
+            plaintext, container, Cipher.Aes256Gcm, keys.PublicKeyPem, RsaOaepHash.Sha256, null,
+            TestContext.Current.CancellationToken);
 
         container.Position = 0;
         using CancellationTokenSource cancelAfterFirstChunks = new();
@@ -125,7 +128,8 @@ public sealed class RsaCancellationTests(RsaKeyFixture keys)
         using CancellationTokenSource live = new();
         using MemoryStream input = new(plaintext, writable: false);
         using MemoryStream container = new();
-        await service.EncryptAsync(input, container, Cipher.Aes256Gcm, keys.PublicKeyPem, null, live.Token);
+        await service.EncryptAsync(
+            input, container, Cipher.Aes256Gcm, keys.PublicKeyPem, RsaOaepHash.Sha256, null, live.Token);
 
         container.Position = 0;
         using MemoryStream recovered = new();

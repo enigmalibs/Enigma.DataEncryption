@@ -7,9 +7,10 @@ namespace Enigma.DataEncryption;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Header byte <c>0x05</c> is <b>reserved</b> for a true RSA + ML-KEM hybrid method and is
-/// deliberately absent from this enumeration until that method is implemented. A reader of format
-/// version <c>0x10</c> rejects it. See <c>docs/format.md</c> §2.2 and §10.
+/// Header bytes <c>0x06</c>–<c>0xFF</c> are unassigned; a reader of format version <c>0x10</c> rejects
+/// them. Byte <c>0x05</c> was reserved by earlier revisions of the format and is now
+/// <see cref="Hybrid"/> — which is the reservation working as intended, since the hybrid method landed
+/// without a format-version bump. See <c>docs/format.md</c> §2.2 and §10.
 /// </para>
 /// <para>
 /// Each service reads only its own method byte, so handing a PBKDF2 container to the RSA service is a
@@ -31,7 +32,8 @@ public enum EncryptionMethod : byte
     Argon2 = 0x02,
 
     /// <summary>
-    /// RSAES-OAEP (SHA-256) key transport under an RSA key pair. Header byte <c>0x03</c>; served by
+    /// RSAES-OAEP key transport under an RSA key pair, with the padding hash selected at encryption time
+    /// and recorded in the header (SHA-256, SHA-384 or SHA-512). Header byte <c>0x03</c>; served by
     /// <see cref="IRsaDataEncryptionService"/>.
     /// </summary>
     Rsa = 0x03,
@@ -42,4 +44,15 @@ public enum EncryptionMethod : byte
     /// </summary>
     // ReSharper disable once InconsistentNaming
     MLKem = 0x04,
+
+    /// <summary>
+    /// True hybrid: RSAES-OAEP (SHA-256) key transport <b>and</b> ML-KEM (FIPS 203) key encapsulation,
+    /// with the data key combined from both secrets so that breaking one primitive is not enough. Header
+    /// byte <c>0x05</c>; served by <see cref="IHybridDataEncryptionService"/>.
+    /// </summary>
+    /// <remarks>
+    /// The only method requiring two credentials in both directions. See <c>docs/format.md</c> §3.5, and
+    /// §3.5.1 for the key combiner.
+    /// </remarks>
+    Hybrid = 0x05,
 }

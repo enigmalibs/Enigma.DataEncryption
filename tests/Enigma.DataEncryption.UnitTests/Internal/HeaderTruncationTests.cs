@@ -8,8 +8,8 @@ using Xunit;
 namespace Enigma.DataEncryption.UnitTests.Internal;
 
 /// <summary>
-/// Truncates every header shape at <b>every</b> byte offset and asserts each one is reported as
-/// <see cref="DataEncryptionFormatException"/>.
+/// Truncates every one of the five header shapes at <b>every</b> byte offset and asserts each one is
+/// reported as <see cref="DataEncryptionFormatException"/>.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -31,7 +31,7 @@ public sealed class HeaderTruncationTests
     public static TheoryData<HeaderShape, int> EveryTruncation()
     {
         TheoryData<HeaderShape, int> data = [];
-        foreach (HeaderShape shape in new[] { HeaderShape.Pbkdf2, HeaderShape.Argon2, HeaderShape.Rsa, HeaderShape.MLKem })
+        foreach (HeaderShape shape in FormatTestData.AllShapes)
         {
             for (int length = 0; length < FormatTestData.HeaderLengthOf(shape); length++)
             {
@@ -77,6 +77,7 @@ public sealed class HeaderTruncationTests
     [InlineData(HeaderShape.Argon2, 50)]
     [InlineData(HeaderShape.Rsa, 100)]
     [InlineData(HeaderShape.MLKem, 200)]
+    [InlineData(HeaderShape.Hybrid, 500)]
     public async Task TheUnderlyingIoExceptionIsPreservedAsTheInnerException(HeaderShape shape, int truncateTo)
     {
         byte[] header = await FormatTestData.BuildHeaderAsync(shape);
@@ -107,7 +108,7 @@ public sealed class HeaderTruncationTests
         byte[] header = await FormatTestData.BuildHeaderAsync(HeaderShape.Rsa);
 
         // Announce 4,096 bytes — within the cap — while supplying only 256.
-        byte[] patched = FormatTestData.WithInt32At(header, 17, 4_096);
+        byte[] patched = FormatTestData.WithInt32At(header, 18, 4_096);
 
         await Assert.ThrowsAsync<DataEncryptionFormatException>(
             () => FormatTestData.ReadHeaderAsync(patched, EncryptionMethod.Rsa));
@@ -160,7 +161,9 @@ public sealed class HeaderTruncationTests
             data.Add(HeaderShape.Argon2, length);
         }
 
-        foreach (int length in new[] { 0, 5, 17, 20, 21, 22, 276, 277, 292 })
+        // The RSA boundaries: the OAEP-hash byte at 5, the nonce, the length field at 18, its first value
+        // byte at 22, and the tag at 22 + N = 278.
+        foreach (int length in new[] { 0, 5, 6, 18, 21, 22, 23, 277, 278, 293 })
         {
             data.Add(HeaderShape.Rsa, length);
         }
@@ -168,6 +171,13 @@ public sealed class HeaderTruncationTests
         foreach (int length in new[] { 0, 5, 6, 18, 21, 22, 23, 789, 790, 805 })
         {
             data.Add(HeaderShape.MLKem, length);
+        }
+
+        // The hybrid's boundaries: the parameter-set byte, the nonce, the first length field, the first
+        // value, the *second* length field at 22 + N = 278, the second value, and the tag at 26 + N + M.
+        foreach (int length in new[] { 0, 5, 6, 18, 21, 22, 277, 278, 281, 282, 1_049, 1_050, 1_065 })
+        {
+            data.Add(HeaderShape.Hybrid, length);
         }
 
         return data;

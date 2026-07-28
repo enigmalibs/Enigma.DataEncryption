@@ -4,9 +4,9 @@ The first public release of **Enigma.DataEncryption** — a .NET library that en
 streams into a self-describing binary container: a header carrying everything a reader needs to decrypt,
 followed by an AEAD payload. Every credential type follows one idiom — pick the service that matches your
 credential, hand it an input stream, an output stream and the credential — and every method derives or
-transports a 32-byte data key, then encrypts the payload with a 256-bit block cipher in GCM mode. It is
-built on [Enigma.Core](https://www.nuget.org/packages/Enigma.Core), which supplies every cryptographic
-primitive; BouncyCastle backs Enigma.Core but never appears on this library's public surface.
+transports or combines a 32-byte data key, then encrypts the payload with a 256-bit block cipher in GCM
+mode. It is built on [Enigma.Core](https://www.nuget.org/packages/Enigma.Core), which supplies every
+cryptographic primitive; BouncyCastle backs Enigma.Core but never appears on this library's public surface.
 
 ## Feature overview
 
@@ -16,13 +16,27 @@ primitive; BouncyCastle backs Enigma.Core but never appears on this library's pu
   the cost parameters into the header, so decryption needs nothing but the container and the password.
   Both accept a `byte[]` or a `char[]` password, and clear the key material they derive.
 - **RSA encryption** — `IRsaDataEncryptionService` transports a freshly generated data key under
-  RSAES-OAEP-SHA256, taking PEM-encoded keys directly. Encrypted private-key PEMs are supported through
-  an optional `keyPassword`.
+  RSAES-OAEP, with the padding hash **selectable at encryption time and recorded in the header**:
+  SHA-256 (the default), SHA-384 or SHA-512. SHA-1 is rejected and its wire byte reserved. Because the
+  hash travels in the container, decryption takes no hash argument. Note that a larger hash needs a
+  larger modulus — RFC 8017 requires `2·hLen + 34` bytes, so RSA-1024 is too small for SHA-384 and
+  SHA-512, while RSA-2048 and above accept all three. PEM-encoded keys are taken directly, and encrypted
+  private-key PEMs are supported through an optional `keyPassword`.
 - **Post-quantum ML-KEM encryption** — `IMLKemDataEncryptionService` establishes the data key by ML-KEM
   key encapsulation (FIPS 203) at parameter set 512, 768 or 1024, taking the encapsulated shared secret
   as the data key directly. FIPS 203 implicit rejection means decapsulation with a wrong key *succeeds*
   and yields a different secret; the header's key-confirmation tag is what turns that into a clean,
   immediate failure.
+- **True RSA + ML-KEM hybrid encryption** — `IHybridDataEncryptionService` is the strongest option the
+  library offers, and the only method taking two credentials. It wraps a random 32-byte secret under the
+  recipient's RSA public key with RSAES-OAEP-SHA256, encapsulates a second secret against their ML-KEM
+  public key, and **combines both** into the data key with a split-key PRF — the XOR of two
+  domain-separated HMAC-SHA256 outputs, one keyed by each secret, over a transcript binding both
+  ciphertexts. If either key is a value the attacker does not hold, the data key is indistinguishable from
+  random, so the container survives a quantum break of RSA *and* a classical break of ML-KEM. Both private
+  keys are required to decrypt, and they fail in different places: a wrong RSA key is caught by the OAEP
+  unwrap, while a wrong ML-KEM key reaches the key-confirmation tag, because implicit rejection lets its
+  decapsulation succeed. `docs/format.md` §3.5.1 specifies the combiner and §3.5.2 states its rationale.
 - **Four AEAD ciphers** — AES-256, Twofish-256, Serpent-256 and Camellia-256, each in GCM mode with a
   12-byte nonce and a 128-bit tag, selected per call through the `Cipher` enum and recorded in the header.
 - **An authenticated, self-describing container** — the **complete header is passed as GCM associated
@@ -39,13 +53,13 @@ primitive; BouncyCastle backs Enigma.Core but never appears on this library's pu
 - **Header inspection without decryption** — `IEncryptedDataInspector` parses a container's header and
   returns an `EncryptedDataHeader` with no credential at all, for the detect-then-dispatch pattern and for
   gating on derivation cost before you commit to paying it.
-- **File-path helpers** — twelve `DataEncryptionFileExtensions` wrappers covering every method, opening
+- **File-path helpers** — fourteen `DataEncryptionFileExtensions` wrappers covering every method, opening
   asynchronous `FileStream`s, creating or overwriting the output, and deleting a partial output on any
   failure including cancellation.
 - **Asynchronous, cancellable, observable** — every operation is `async` and takes an optional
-  `IProgress<int>` (payload bytes processed) and a `CancellationToken`. All five services are stateless
+  `IProgress<int>` (payload bytes processed) and a `CancellationToken`. All six services are stateless
   and safe for concurrent use, so a single instance can be shared across an application.
-- **Dependency injection in one call** — `AddEnigmaDataEncryption()` registers all five services, and the
+- **Dependency injection in one call** — `AddEnigmaDataEncryption()` registers all six services, and the
   Enigma.Core factories they depend on, as singletons using `TryAdd`, so any of them can be overridden.
 
 ## Compatibility
@@ -63,7 +77,8 @@ format changed in ways that are not expressible as a compatible extension:
 - the complete header is now authenticated as AEAD associated data, so every header byte is covered by
   the payload tag;
 - a key-confirmation tag was added to the header, making the construction key-committing;
-- the RSA data key is wrapped with RSAES-OAEP-SHA256;
+- the RSA data key is wrapped with RSAES-OAEP rather than PKCS#1 v1.5, under a padding hash the header
+  records;
 - Argon2's memory cost is recorded in **KiB** rather than bytes.
 
 Each of those changes the bytes on the wire. Rather than risk mis-reading an old file, this release rejects

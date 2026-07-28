@@ -1,6 +1,7 @@
 # FEATURE-5A30 — True hybrid RSA + ML-KEM method `0x05`
 
-**Status:** TODO — **now part of v1.0.0; first of the three pre-release items**
+**Status:** DONE — **shipped into v1.0.0; first of the three pre-release items, now complete**
+**Completion record:** `docs/done/FEATURE-5A30.md`
 **Type:** FEATURE (single-phase)
 **Suggested branch:** `feature/feature-5a30-hybrid`
 **Depends on:** FEATURE-11B6 (complete)
@@ -33,6 +34,12 @@ so it needs no format-version bump and no awkward byte allocation — and becaus
 
 Add a fifth encryption method that wraps the data key under an RSA public key **and** an ML-KEM public
 key, deriving the data key from both secrets, so that breaking one primitive is insufficient.
+
+> **The construction was settled.** The combiner below was the runner-up. What shipped is a **split-key XOR
+> of two domain-separated HMAC-SHA256 PRFs**, one keyed by each secret, over a transcript binding both
+> ciphertexts — normatively specified in `docs/format.md` §3.5.1, with §3.5.2 recording why the HKDF-Extract
+> shape sketched here was not chosen (its "secure if either holds" argument needs HMAC's dual-PRF property,
+> a stronger assumption than the rest of the format relies on). The sketch is kept as written for the record.
 
 ## Design sketch (to be settled during the dev, not assumed here)
 

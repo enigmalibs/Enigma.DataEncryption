@@ -4,10 +4,9 @@ Guidance for Claude Code (and other AI agents) working in this repository.
 
 ## Current state
 
-**The four implemented methods are functionally complete. Three planned items now stand between the
-library and the release** — `FEATURE-5A30` (the hybrid method `0x05`), `FEATURE-0D64` (a selectable RSA-OAEP
-hash) and `FEATURE-F612` (a full adversarial audit, whose findings become a `CODE-REVIEW` item). See
-*Dev workflow* below; `docs/roadmap.md` is authoritative. `FEATURE-67FD` stood up the git
+**The five implemented methods are functionally complete. One planned item now stands between the
+library and the release** — `FEATURE-F612` (a full adversarial audit, whose findings become a
+`CODE-REVIEW` item). See *Dev workflow* below; `docs/roadmap.md` is authoritative. `FEATURE-67FD` stood up the git
 repo, the root configuration, the multi-targeted library and an MTP-native xUnit v3 test project.
 `FEATURE-00E7` then added the normative format spec (`docs/format.md`) and the **complete public API
 surface** — enums, constants, limits, the header record, the exception hierarchy, five service interfaces
@@ -23,7 +22,8 @@ seam — all fully XML-documented.
 - **`PHASE02`** — the two password-based services, pinned by golden vectors computed outside this library
   (Python's `hashlib`/`hmac`, OpenSSL's `ARGON2ID`, the platform's `AesGcm`), with the payload stage and the
   credential handling factored into `Internal/PayloadCipher.cs` and `Internal/PasswordCredential.cs`.
-- **`PHASE03`** — the RSA service, transporting its data key under RSAES-OAEP-SHA256, with golden vectors
+- **`PHASE03`** — the RSA service, transporting its data key under RSAES-OAEP (fixed at SHA-256 then;
+  `FEATURE-0D64` later made the hash a header field), with golden vectors
   that pin every byte OAEP's own randomness allows (the wrapped key is the exception, and the suite says so)
   and committed PEM fixtures for the read path.
 - **`PHASE04`** — the ML-KEM service, taking the encapsulated shared secret directly as its data key (the one
@@ -31,14 +31,31 @@ seam — all fully XML-documented.
   implicit rejection makes decapsulation with a wrong key *succeed*, and the suite proves that against
   Enigma.Core first, then proves the tag rejects it before a payload byte is read.
 - **`PHASE05`** — the inspector, the twelve file-path extensions, and the cross-cutting suites that needed
-  all four methods present: a generated malformed-input sweep (~2,600 corrupted containers per TFM, asserting
-  the exception is always one of the two container types and never an indexing, allocation or unwrapped
-  Enigma.Core failure), thread-safety for all five singletons, DI round-trips through resolved services, and
+  all four methods present: a generated malformed-input sweep (asserting the exception is always one of the
+  two container types and never an indexing, allocation or unwrapped Enigma.Core failure — now ~4,700 cases
+  per TFM, after `FEATURE-5A30` added a fifth shape and `FEATURE-0D64` a fifth edited selector),
+  thread-safety for all five singletons, DI round-trips through resolved services, and
   an executable inventory of every committed fixture.
 
-**Nothing in the library throws `NotImplementedException` any more.** All five services, the file-path
-extensions, `AddEnigmaDataEncryption()` and `RandomSource` are real. The suite is ~16,150 tests over both
-test TFMs, with the library at ~97% line / ~91% branch coverage.
+`FEATURE-5A30` then added the **fifth method, the hybrid `0x05`** — the only one taking two credentials —
+claiming the reserved method byte with no format-version bump. Its one genuinely new construction is the
+**key combiner** (`docs/format.md` §3.5.1); see the load-bearing note below before touching it. It also
+widened everything the phase list above describes as covering four methods: there are now **fourteen**
+file-path extensions, the malformed-input sweep runs over five shapes (the hybrid's 1,066-byte header
+included, truncated at every offset), and the thread-safety suite drives six singletons.
+
+`FEATURE-0D64` then made method `0x03`'s **RSA-OAEP padding hash a header field** — SHA-256 (default),
+SHA-384 or SHA-512, selected at encrypt time and read from the container at decrypt time; SHA-1 rejected and
+its wire byte reserved. It claimed **offset 5**, where ML-KEM and the hybrid already put their parameter set,
+so the `0x03` header grew from `37 + N` to `38 + N` and **every offset past 4 moved**. Two consequences are
+easy to trip over: the two public-key shapes are now structurally identical at `38 + N` (`FormatLayoutTests`
+asserts their equality, where it once asserted a one-byte difference), and the hybrid `0x05` deliberately did
+**not** follow — its wrap stays fixed at OAEP-SHA-256, so `docs/format.md` §4's wrapping row is normative for
+`0x05` alone. Format version stayed `0x10`.
+
+**Nothing in the library throws `NotImplementedException` any more.** All six services, the file-path
+extensions, `AddEnigmaDataEncryption()` and `RandomSource` are real. The suite is ~28,272 tests over both
+test TFMs, with the library at ~98% line / ~92% branch coverage.
 
 Two behaviours worth knowing before you touch the file-path extensions: **arguments are validated before
 either file is opened** (the output is `FileMode.Create`, so validating later would truncate a caller's
@@ -73,24 +90,36 @@ It is the successor to `Enigma.Cryptography.DataEncryption`.
 
 ## Architecture
 
-Four encryption **methods**, one service each, plus an inspector:
+Five encryption **methods**, one service each, plus an inspector:
 
 | Method | Byte | Service | Credential |
 |---|---|---|---|
 | PBKDF2 | `0x01` | `IPbkdf2DataEncryptionService` | password |
 | Argon2 | `0x02` | `IArgon2DataEncryptionService` | password |
-| RSA | `0x03` | `IRsaDataEncryptionService` | RSA key pair (PEM) |
+| RSA | `0x03` | `IRsaDataEncryptionService` | RSA key pair (PEM) — the only method with a selectable OAEP hash |
 | ML-KEM | `0x04` | `IMLKemDataEncryptionService` | ML-KEM key pair (raw bytes) |
+| Hybrid | `0x05` | `IHybridDataEncryptionService` | **both** — an RSA key pair (PEM) *and* an ML-KEM key pair (raw bytes) |
 
-`IEncryptedDataInspector` reads a container's header without decrypting it. `0x05` is **reserved**
-for a true RSA + ML-KEM hybrid (`FEATURE-5A30`, now part of v1.0.0 and the next item to build).
+`IEncryptedDataInspector` reads a container's header without decrypting it. Method bytes `0x06`–`0xFF` are
+unassigned and rejected; `0x05` was reserved and is now assigned, which is the reservation from
+`FEATURE-00E7` working as intended — the hybrid landed with no format-version bump.
 
-Method `0x03`'s wrapping hash is **fixed at OAEP-SHA-256 today and becomes a header field** in
-`FEATURE-0D64` (SHA-256/384/512; SHA-1 rejected, its wire byte reserved). Until that item lands,
-`docs/format.md` §4 is correct as written — treat the plan, not the spec, as the description of the
-future state.
+**Method `0x03`'s wrapping hash is a header field (offset 5); the hybrid's is not.** `FEATURE-0D64` made
+`0x03` selectable — SHA-256 (default), SHA-384 or SHA-512, with SHA-1 rejected and its wire byte `0x01`
+reserved — and deliberately left `0x05` on a fixed OAEP-SHA-256 wrap, because the hybrid's wrap is one input
+to the key combiner rather than the whole of key transport and carries no compliance argument of its own. So
+`docs/format.md` §4's wrapping row is normative for **`0x05` alone**, and `0x03` points at §3.3. Do not
+"restore the symmetry" by giving the hybrid a hash field: that would need a format change for no benefit, and
+§3.5.1's transcript would have to cover the new byte.
 
-Every method derives or transports a 32-byte data key, then encrypts the payload with a
+Two things this makes true and easy to forget. **The two public-key shapes are now the same length** —
+`0x03` and `0x04` are both `38 + N`, each with a one-byte algorithm selector at offset 5 — and
+`RsaOaepHashWire`/`MLKemParameterSetWire` keep **separate** wire mappings and separate `FormatLayout`
+constants for that shared offset on purpose, so each shape's arithmetic still reads on its own. **Decryption
+takes no hash argument** anywhere: the reader resolves offset 5, so an edited byte fails as an OAEP unwrap
+error rather than needing a rule of its own.
+
+Every method derives, transports or combines a 32-byte data key, then encrypts the payload with a
 **256-bit AEAD block cipher in GCM mode** (AES / Twofish / Serpent / Camellia), passing the
 **complete header as AAD** so any header edit is an authentication failure. A **key-confirmation tag**
 in the header gives uniform, fast, wrong-credential detection before a single payload byte is read,
@@ -98,7 +127,7 @@ and makes the construction key-committing (plain GCM is not).
 
 The normative binary format is `docs/format.md`. **It is the contract** — code and spec must agree on
 every offset, size and constant. `tests/…/Api/FormatConstantsTests.cs` enforces that agreement for the
-constants and the four header lengths; keep both sides in step when either changes.
+constants and the five header lengths; keep both sides in step when either changes.
 
 **Load-bearing invariant — BouncyCastle never leaks onto the public surface.** BouncyCastle backs
 Enigma.Core, which backs this library, but no `Org.BouncyCastle.*` type may appear on any exported
@@ -107,7 +136,22 @@ type or member. The reflection guard
 walks every exported type and fails the build on a violation. Keep it green.
 
 **Watch the ML-KEM parameter-set byte.** Enigma.Core's `MLKemParameterSet` is an unnumbered enum
-(`0`/`1`/`2`), but the header bytes are `0x01`/`0x02`/`0x03`. Map explicitly — never cast.
+(`0`/`1`/`2`), but the header bytes are `0x01`/`0x02`/`0x03`. Map explicitly — never cast. Methods `0x04` and
+`0x05` share both the field and its offset 5.
+
+**Load-bearing invariant — the hybrid key combiner is a *split-key PRF*, not an XOR of the two secrets.**
+`docs/format.md` §3.5.1 specifies it, §3.5.2 states the rationale, and `Internal/HybridKeyCombiner.cs`
+implements it. Two things about it are easy to "simplify" and must not be:
+
+- **Each secret keys its own HMAC** and never appears in a message. That is what makes "secure if *either*
+  secret is secure" a one-line reduction from "HMAC is a PRF" — the same assumption key confirmation already
+  makes. Concatenating the secrets into one HMAC message (the HKDF-Extract shape the plan sketched) was
+  considered and rejected: it needs HMAC's *dual*-PRF property instead. XOR-ing the two secrets together
+  gives neither property.
+- **The two domain-separation labels differ.** With one shared label, `rsaSecret == kemSecret` makes the two
+  branches identical and their XOR 32 zero bytes — a container readable by anyone holding neither private
+  key. That is not a 2⁻²⁵⁶ accident: a hostile *sender* encapsulates first, sees `kemSecret`, then chooses
+  what to wrap under RSA. `HybridKeyCombinerTests` pins both points, with a literal cross-language vector.
 
 **Async / progress / cancellation.** Every operation is `async`, taking an optional
 `IProgress<int>` (payload bytes processed — header bytes are not counted) and a `CancellationToken`.
@@ -126,14 +170,14 @@ SECURITY.md                          Security policy — GitHub private vulnerab
 LICENSE.md                           MIT; named by PackageLicenseFile and packed
 src/Enigma.DataEncryption/           The library
   Cipher.cs                          enum Cipher : byte            (0x01–0x04)
-  EncryptionMethod.cs                enum EncryptionMethod : byte  (0x01–0x04; 0x05 reserved)
+  EncryptionMethod.cs                enum EncryptionMethod : byte  (0x01–0x05; 0x06–0xFF unassigned)
   DataEncryptionDefaults.cs          Format version, fixed sizes, default KDF costs
   DataEncryptionLimits.cs            Header-field upper bounds (+ the shared Default)
   EncryptedDataHeader.cs             Parsed header record returned by the inspector
-  DataEncryptionFileExtensions.cs    File-path wrappers (12 extension methods)
+  DataEncryptionFileExtensions.cs    File-path wrappers (14 extension methods)
   ServiceCollectionExtensions.cs     AddEnigmaDataEncryption() — ns Microsoft.Extensions.DependencyInjection
   Exceptions/                        DataEncryptionException + Format/Decryption subclasses
-  Services/                          The 4 encryption services + the inspector (interface + impl)
+  Services/                          The 5 encryption services + the inspector (interface + impl)
   Internal/                          The format machinery (all internal — see below)
     HeaderWriter.cs                  Builds, tags, writes and returns each of the 4 header shapes
     HeaderReader.cs                  Parses a header, tee-ing the AAD; translates Enigma.Core's stream failures
@@ -143,9 +187,12 @@ src/Enigma.DataEncryption/           The library
     LimitsValidator.cs               Bounds every cost/length field before any allocation or KDF work
     PayloadCipher.cs                 The shared GCM payload stage (header as AAD) + the AEAD-failure translation
     PasswordCredential.cs            Password validation + the char[] → UTF-8 encoding both KDF methods share
+    HybridKeyCombiner.cs             Method 0x05's split-key-PRF combiner (§3.5.1) — see the note above
     CryptoHelpers.cs                 FixedTimeEquals + Clear(params byte[]?[])
-    FormatLayout.cs                  Magic bytes + the 4 header lengths (computed, not literal)
+    FormatLayout.cs                  Magic bytes + the 5 header lengths (computed, not literal)
     MLKemParameterSetWire.cs         Explicit MLKemParameterSet ↔ wire-byte mapping (never cast)
+    RsaOaepHashWire.cs               Explicit RsaOaepHash ↔ wire-byte mapping for method 0x03's offset 5
+                                     (never cast; SHA-1 rejected both ways, its byte 0x01 reserved)
     IRandomSource.cs / RandomSource.cs   Internal RNG seam
   Properties/AssemblyInfo.cs         InternalsVisibleTo for the test assembly
 tests/Enigma.DataEncryption.UnitTests/   xUnit v3 test suite
@@ -155,12 +202,15 @@ tests/Enigma.DataEncryption.UnitTests/   xUnit v3 test suite
   Api/FormatConstantsTests.cs        Pins the wire constants against docs/format.md
   DependencyInjection/               AddEnigmaDataEncryption() registration tests
   Internal/                          Format-infrastructure suites (round-trip, golden bytes,
-                                     truncation sweep, validation, limits, key confirmation)
+                                     truncation sweep, validation, limits, key confirmation,
+                                     hybrid key combiner)
   Services/                          Password-method suites (round-trip, failure/tamper, argument
                                      matrix, cancellation, golden vectors, key clearing) +
                                      Fixtures/ — committed containers & expected plaintext
 docs/format.md                       Normative binary-format specification (the contract)
 docs/guides/                         Per-category usage guides + index (README.md) — repo-only, not packed
+                                     (7: password-based, rsa, ml-kem, hybrid, header-inspection,
+                                      file-operations, dependency-injection)
 docs/RELEASE.md                      Release runbook (FEATURE-07DA PHASE04) — pre-flight, merge, tag, pack, push
 docs/roadmap.md                      Work-item registry
 docs/plan/                           Per-item plans
@@ -219,7 +269,8 @@ Tests are **MTP-native**: `xunit.v3` + `coverlet.collector`, with **no** `Micros
   (e.g. `MLKemParameterSet`) rather than defining duplicates.
 - **Documentation.** Public APIs carry XML doc comments (`GenerateDocumentationFile=true`), so a
   missing comment fails the build. Per-category usage guides live under `docs/guides/`, indexed by
-  `docs/guides/README.md` (`FEATURE-07DA` PHASE02) — six guides, one per category, plus the index. They
+  `docs/guides/README.md` (`FEATURE-07DA` PHASE02, extended by `FEATURE-5A30`) — seven guides, one per
+  category, plus the index. They
   are **usage**; `docs/format.md` remains the spec, and no wire-format table is duplicated into them.
   Every snippet is verified against the real public surface of *both* this library and Enigma.Core;
   there is no permanent doc-sample test project, so that gate is a per-dev obligation, not a build step.
@@ -250,15 +301,19 @@ written. Commits are left to the maintainer.
 
 The sequence is a hard dependency chain: `FEATURE-67FD` (done) → `FEATURE-00E7` (done — format spec +
 API skeleton) → `FEATURE-11B6` (done — all five phases) → `FEATURE-07DA` (done — all four phases; the
-package, the docs and the runbook are prepared) → **`FEATURE-5A30`** (hybrid method `0x05`) →
-**`FEATURE-0D64`** (selectable RSA-OAEP hash) → **`FEATURE-F612`** (adversarial audit, report only) →
+package, the docs and the runbook are prepared) → `FEATURE-5A30` (done — hybrid method `0x05`) →
+`FEATURE-0D64` (done — selectable RSA-OAEP hash) → **`FEATURE-F612`** (adversarial audit, report only) →
 the **`CODE-REVIEW`** item minted from that report → the maintainer runs `docs/RELEASE.md`.
 
-**v1.0.0 is prepared but *not published*, and the release now waits on those items** — do not treat the
-library as one step from shipping. That the release has not happened is also what keeps `FEATURE-0D64`
-cheap: no container exists outside this repository, so the `0x03` header shape can still change with no
-format-version bump. `FEATURE-F612` is deliberately **last**, so it audits the code that actually ships,
-and it is under a hard code freeze — it writes findings to `docs/review/`, fixes nothing.
+**v1.0.0 is prepared but *not published*, and the release now waits on `FEATURE-F612` and the
+`CODE-REVIEW` item its report mints** — do not treat the library as one step from shipping.
+
+**Both format items have now spent the pre-publication window, and it is the last one.** That no container
+exists outside this repository is what let `FEATURE-5A30` add a header shape and three fixtures, and
+`FEATURE-0D64` move every `0x03` offset past 4, each for nothing but the cost of generating fixtures — both
+with format version staying `0x10`. Publishing closes that window: a further header change would cost a
+version bump or a second method byte. `FEATURE-F612` is deliberately **last**, so it audits the code that
+actually ships, and it is under a hard code freeze — it writes findings to `docs/review/`, fixes nothing.
 
 `FEATURE-136E` (legacy decrypt) is **`ABANDONED`** — the predecessor-file migration need never
 materialized — though format versions `0x01`–`0x0F` stay reserved, so it could return as a new item

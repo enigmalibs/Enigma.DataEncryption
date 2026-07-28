@@ -3,13 +3,14 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Enigma.Core.Asymmetric.Pqc;
+using Enigma.Core.Asymmetric.PublicKey;
 using Enigma.DataEncryption.Internal;
 using Xunit;
 
 namespace Enigma.DataEncryption.UnitTests.Internal;
 
 /// <summary>
-/// Round-trips all four header shapes through <see cref="HeaderWriter"/> and
+/// Round-trips all five header shapes through <see cref="HeaderWriter"/> and
 /// <see cref="HeaderReader"/>, and — the load-bearing assertion — proves the associated data the reader
 /// reconstructs is byte-identical to what the writer produced.
 /// </summary>
@@ -24,7 +25,7 @@ public sealed class HeaderRoundTripTests
     public static TheoryData<HeaderShape, Cipher> ShapesAndCiphers()
     {
         TheoryData<HeaderShape, Cipher> data = [];
-        foreach (HeaderShape shape in new[] { HeaderShape.Pbkdf2, HeaderShape.Argon2, HeaderShape.Rsa, HeaderShape.MLKem })
+        foreach (HeaderShape shape in FormatTestData.AllShapes)
         {
             foreach (Cipher cipher in new[] { Cipher.Aes256Gcm, Cipher.Twofish256Gcm, Cipher.Serpent256Gcm, Cipher.Camellia256Gcm })
             {
@@ -34,6 +35,10 @@ public sealed class HeaderRoundTripTests
 
         return data;
     }
+
+    /// <summary>Every header shape.</summary>
+    /// <returns>The theory data.</returns>
+    public static TheoryData<HeaderShape> Shapes() => [.. FormatTestData.AllShapes];
 
     [Theory]
     [MemberData(nameof(ShapesAndCiphers))]
@@ -182,7 +187,8 @@ public sealed class HeaderRoundTripTests
 
         Assert.Equal(FormatTestData.WrappedKey(), parsed.WrappedKey);
         Assert.Equal(FormatTestData.RsaWrappedKeyLength, parsed.Header.WrappedKeyLength);
-        Assert.Equal(37 + FormatTestData.RsaWrappedKeyLength, parsed.Header.HeaderLength);
+        Assert.Equal(FormatTestData.RsaFixtureOaepHash, parsed.Header.RsaOaepHash);
+        Assert.Equal(38 + FormatTestData.RsaWrappedKeyLength, parsed.Header.HeaderLength);
 
         Assert.Null(parsed.Salt);
         Assert.Null(parsed.Header.Pbkdf2Iterations);
@@ -204,6 +210,112 @@ public sealed class HeaderRoundTripTests
 
         Assert.Null(parsed.Salt);
         Assert.Null(parsed.Header.WrappedKeyLength);
+    }
+
+    /// <summary>
+    /// The hybrid shape is the only one that populates <b>both</b> variable-length fields and the
+    /// parameter-set byte at once, so the assertion worth making is that all three arrive together and
+    /// that nothing else does.
+    /// </summary>
+    [Fact]
+    public async Task HybridFieldsRoundTrip()
+    {
+        ParsedHeader parsed = await FormatTestData.ReadHeaderAsync(
+            await FormatTestData.BuildHeaderAsync(HeaderShape.Hybrid));
+
+        Assert.Equal(FormatTestData.WrappedKey(), parsed.WrappedKey);
+        Assert.Equal(FormatTestData.Encapsulation(), parsed.Encapsulation);
+        Assert.Equal(FormatTestData.RsaWrappedKeyLength, parsed.Header.WrappedKeyLength);
+        Assert.Equal(FormatTestData.MLKemEncapsulationLength, parsed.Header.EncapsulationLength);
+        Assert.Equal(FormatTestData.MLKemFixtureParameterSet, parsed.Header.MLKemParameterSet);
+        Assert.Equal(FormatTestData.MLKemFixtureParameterSet, parsed.MLKemParameterSet);
+        Assert.Equal(
+            42 + FormatTestData.RsaWrappedKeyLength + FormatTestData.MLKemEncapsulationLength,
+            parsed.Header.HeaderLength);
+
+        Assert.Null(parsed.Salt);
+        Assert.Null(parsed.Header.Pbkdf2Iterations);
+        Assert.Null(parsed.Header.Argon2Iterations);
+        Assert.Null(parsed.Header.Argon2MemorySizeKb);
+        Assert.Null(parsed.Header.Argon2DegreeOfParallelism);
+    }
+
+    /// <summary>
+    /// The hybrid's two variable-length fields must not be interchanged. Every combination of a real RSA
+    /// modulus size and a real ML-KEM encapsulation length is round-tripped, and the two are never equal —
+    /// so a reader that read them in the wrong order, or that used one length for both, cannot pass.
+    /// </summary>
+    public static TheoryData<int, int> HybridFieldLengths()
+    {
+        TheoryData<int, int> data = [];
+        foreach (int wrappedSecretLength in new[] { 256, 384, 512 })
+        {
+            foreach (int encapsulationLength in new[] { 768, 1_088, 1_568 })
+            {
+                data.Add(wrappedSecretLength, encapsulationLength);
+            }
+        }
+
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(HybridFieldLengths))]
+    public async Task TheHybridsTwoVariableLengthFieldsAreNotInterchanged(
+        int wrappedSecretLength,
+        int encapsulationLength)
+    {
+        // Distinct fill bytes as well as distinct lengths, so a swap is visible in the content too.
+        byte[] wrappedSecret = FormatTestData.Sequence(0x11, wrappedSecretLength);
+        byte[] encapsulation = FormatTestData.Sequence(0x99, encapsulationLength);
+
+        using MemoryStream container = new();
+        await HeaderWriter.WriteHybridHeaderAsync(
+            container,
+            Cipher.Camellia256Gcm,
+            MLKemParameterSet.MLKem768,
+            FormatTestData.Nonce(),
+            wrappedSecret,
+            encapsulation,
+            FormatTestData.DataKey(),
+            FormatTestData.HmacSha256(),
+            CancellationToken.None);
+        container.Position = 0;
+
+        ParsedHeader parsed = await HeaderReader.ReadAsync(
+            container, EncryptionMethod.Hybrid, DataEncryptionLimits.Default, CancellationToken.None);
+
+        Assert.Equal(wrappedSecret, parsed.WrappedKey);
+        Assert.Equal(encapsulation, parsed.Encapsulation);
+        Assert.Equal(wrappedSecretLength, parsed.Header.WrappedKeyLength);
+        Assert.Equal(encapsulationLength, parsed.Header.EncapsulationLength);
+        Assert.Equal(42 + wrappedSecretLength + encapsulationLength, parsed.Header.HeaderLength);
+    }
+
+    /// <summary>All three ML-KEM parameter sets round-trip through the hybrid's header byte too.</summary>
+    [Theory]
+    [InlineData(MLKemParameterSet.MLKem512)]
+    [InlineData(MLKemParameterSet.MLKem768)]
+    [InlineData(MLKemParameterSet.MLKem1024)]
+    public async Task EveryMLKemParameterSetRoundTripsInAHybridHeader(MLKemParameterSet parameterSet)
+    {
+        using MemoryStream container = new();
+        await HeaderWriter.WriteHybridHeaderAsync(
+            container,
+            Cipher.Serpent256Gcm,
+            parameterSet,
+            FormatTestData.Nonce(),
+            FormatTestData.WrappedKey(),
+            FormatTestData.Encapsulation(),
+            FormatTestData.DataKey(),
+            FormatTestData.HmacSha256(),
+            CancellationToken.None);
+        container.Position = 0;
+
+        ParsedHeader parsed = await HeaderReader.ReadAsync(
+            container, EncryptionMethod.Hybrid, DataEncryptionLimits.Default, CancellationToken.None);
+
+        Assert.Equal(parameterSet, parsed.Header.MLKemParameterSet);
     }
 
     /// <summary>All three ML-KEM parameter sets round-trip through the header byte.</summary>
@@ -248,6 +360,7 @@ public sealed class HeaderRoundTripTests
         await HeaderWriter.WriteRsaHeaderAsync(
             container,
             Cipher.Serpent256Gcm,
+            FormatTestData.RsaFixtureOaepHash,
             FormatTestData.Nonce(),
             wrappedKey,
             FormatTestData.DataKey(),
@@ -259,16 +372,66 @@ public sealed class HeaderRoundTripTests
             container, EncryptionMethod.Rsa, DataEncryptionLimits.Default, CancellationToken.None);
 
         Assert.Equal(wrappedKey, parsed.WrappedKey);
-        Assert.Equal(37 + wrappedKeyLength, parsed.Header.HeaderLength);
+        Assert.Equal(38 + wrappedKeyLength, parsed.Header.HeaderLength);
+    }
+
+    /// <summary>
+    /// Every accepted OAEP hash survives the writer/reader pair, and the reader reports it on both the
+    /// internal result and the public header — <c>docs/format.md</c> §3.3.
+    /// </summary>
+    [Theory]
+    [InlineData(RsaOaepHash.Sha256)]
+    [InlineData(RsaOaepHash.Sha384)]
+    [InlineData(RsaOaepHash.Sha512)]
+    public async Task EveryRsaOaepHashRoundTrips(RsaOaepHash oaepHash)
+    {
+        byte[] wrappedKey = FormatTestData.Sequence(0x33, FormatTestData.RsaWrappedKeyLength);
+
+        using MemoryStream container = new();
+        await HeaderWriter.WriteRsaHeaderAsync(
+            container,
+            Cipher.Twofish256Gcm,
+            oaepHash,
+            FormatTestData.Nonce(),
+            wrappedKey,
+            FormatTestData.DataKey(),
+            FormatTestData.HmacSha256(),
+            CancellationToken.None);
+
+        // The byte really is at offset 5, not merely recoverable.
+        Assert.Equal(RsaOaepHashWire.ToWireByte(oaepHash), container.ToArray()[5]);
+
+        container.Position = 0;
+        ParsedHeader parsed = await HeaderReader.ReadAsync(
+            container, EncryptionMethod.Rsa, DataEncryptionLimits.Default, CancellationToken.None);
+
+        Assert.Equal(oaepHash, parsed.RsaOaepHash);
+        Assert.Equal(oaepHash, parsed.Header.RsaOaepHash);
+        Assert.Equal(wrappedKey, parsed.WrappedKey);
+    }
+
+    /// <summary>
+    /// The hash property is method-specific: only <c>0x03</c> populates it, and in particular the hybrid
+    /// does not, because its wrap is fixed at SHA-256 and no container records it (§4).
+    /// </summary>
+    [Theory]
+    [InlineData(HeaderShape.Pbkdf2)]
+    [InlineData(HeaderShape.Argon2)]
+    [InlineData(HeaderShape.MLKem)]
+    [InlineData(HeaderShape.Hybrid)]
+    public async Task OnlyTheRsaShapeReportsAnOaepHash(HeaderShape shape)
+    {
+        ParsedHeader parsed = await FormatTestData.ReadHeaderAsync(
+            await FormatTestData.BuildHeaderAsync(shape));
+
+        Assert.Null(parsed.RsaOaepHash);
+        Assert.Null(parsed.Header.RsaOaepHash);
     }
 
     // --- The tag the writer sealed is the tag the reader confirms -----------------------------------
 
     [Theory]
-    [InlineData(HeaderShape.Pbkdf2)]
-    [InlineData(HeaderShape.Argon2)]
-    [InlineData(HeaderShape.Rsa)]
-    [InlineData(HeaderShape.MLKem)]
+    [MemberData(nameof(Shapes))]
     public async Task TheWrittenTagConfirmsUnderTheSameDataKey(HeaderShape shape)
     {
         ParsedHeader parsed = await FormatTestData.ReadHeaderAsync(await FormatTestData.BuildHeaderAsync(shape));
@@ -281,10 +444,7 @@ public sealed class HeaderRoundTripTests
     }
 
     [Theory]
-    [InlineData(HeaderShape.Pbkdf2)]
-    [InlineData(HeaderShape.Argon2)]
-    [InlineData(HeaderShape.Rsa)]
-    [InlineData(HeaderShape.MLKem)]
+    [MemberData(nameof(Shapes))]
     public async Task TheWrittenTagDoesNotConfirmUnderADifferentDataKey(HeaderShape shape)
     {
         ParsedHeader parsed = await FormatTestData.ReadHeaderAsync(await FormatTestData.BuildHeaderAsync(shape));
@@ -301,10 +461,7 @@ public sealed class HeaderRoundTripTests
     /// the message §6 says the tag is computed over.
     /// </summary>
     [Theory]
-    [InlineData(HeaderShape.Pbkdf2)]
-    [InlineData(HeaderShape.Argon2)]
-    [InlineData(HeaderShape.Rsa)]
-    [InlineData(HeaderShape.MLKem)]
+    [MemberData(nameof(Shapes))]
     public async Task BytesBeforeTagIsTheHeaderMinusTheTag(HeaderShape shape)
     {
         byte[] header = await FormatTestData.BuildHeaderAsync(shape);
@@ -323,10 +480,7 @@ public sealed class HeaderRoundTripTests
     /// which also proves the tee mirrors short reads correctly.
     /// </summary>
     [Theory]
-    [InlineData(HeaderShape.Pbkdf2)]
-    [InlineData(HeaderShape.Argon2)]
-    [InlineData(HeaderShape.Rsa)]
-    [InlineData(HeaderShape.MLKem)]
+    [MemberData(nameof(Shapes))]
     public async Task TheReaderWorksOverANonSeekableDripFedStream(HeaderShape shape)
     {
         byte[] header = await FormatTestData.BuildHeaderAsync(shape);

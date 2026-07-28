@@ -20,7 +20,7 @@ namespace Microsoft.Extensions.DependencyInjection;
 public static class ServiceCollectionExtensions
 {
     /// <summary>
-    /// Registers the four encryption services, the inspector, and the Enigma.Core factories they
+    /// Registers the five encryption services, the inspector, and the Enigma.Core factories they
     /// depend on.
     /// </summary>
     /// <param name="services">The service collection to add to.</param>
@@ -28,7 +28,7 @@ public static class ServiceCollectionExtensions
     /// <remarks>
     /// <para>Registers, all as singletons:</para>
     /// <list type="bullet">
-    ///   <item><description><see cref="IPbkdf2DataEncryptionService"/>, <see cref="IArgon2DataEncryptionService"/>, <see cref="IRsaDataEncryptionService"/>, <see cref="IMLKemDataEncryptionService"/> and <see cref="IEncryptedDataInspector"/>;</description></item>
+    ///   <item><description><see cref="IPbkdf2DataEncryptionService"/>, <see cref="IArgon2DataEncryptionService"/>, <see cref="IRsaDataEncryptionService"/>, <see cref="IMLKemDataEncryptionService"/>, <see cref="IHybridDataEncryptionService"/> and <see cref="IEncryptedDataInspector"/>;</description></item>
     ///   <item><description>the Enigma.Core factories those services consume — <see cref="IBlockCipherServiceFactory"/>, <see cref="IPbkdf2ServiceFactory"/>, <see cref="IArgon2ServiceFactory"/>, <see cref="IPublicKeyServiceFactory"/>, <see cref="IMLKemServiceFactory"/> and <see cref="IHmacServiceFactory"/>. Enigma.Core deliberately ships no <c>AddEnigmaCore</c>, so registering them is this method's responsibility.</description></item>
     /// </list>
     /// <para>
@@ -80,6 +80,14 @@ public static class ServiceCollectionExtensions
 
         services.TryAddSingleton<IMLKemDataEncryptionService>(sp => new MLKemDataEncryptionService(
             sp.GetRequiredService<IBlockCipherServiceFactory>(),
+            sp.GetRequiredService<IMLKemServiceFactory>(),
+            sp.GetRequiredService<IHmacServiceFactory>(),
+            sp.GetRequiredService<IRandomSource>()));
+
+        // The hybrid takes four factories rather than three — it drives both public-key primitives.
+        services.TryAddSingleton<IHybridDataEncryptionService>(sp => new HybridDataEncryptionService(
+            sp.GetRequiredService<IBlockCipherServiceFactory>(),
+            sp.GetRequiredService<IPublicKeyServiceFactory>(),
             sp.GetRequiredService<IMLKemServiceFactory>(),
             sp.GetRequiredService<IHmacServiceFactory>(),
             sp.GetRequiredService<IRandomSource>()));

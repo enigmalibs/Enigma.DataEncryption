@@ -21,16 +21,30 @@ public sealed class FormatConstantsTests
     [InlineData(EncryptionMethod.Argon2, 0x02)]
     [InlineData(EncryptionMethod.Rsa, 0x03)]
     [InlineData(EncryptionMethod.MLKem, 0x04)]
+    [InlineData(EncryptionMethod.Hybrid, 0x05)]
     public void EncryptionMethod_HasTheSpecifiedByteValue(EncryptionMethod method, byte expected) =>
         Assert.Equal(expected, (byte)method);
 
     /// <summary>
-    /// <c>0x05</c> is reserved for the RSA + ML-KEM hybrid and must not be a defined member until
-    /// that method exists — see <c>docs/format.md</c> §10.
+    /// <c>0x05</c> was reserved for the RSA + ML-KEM hybrid and is now assigned to it — see
+    /// <c>docs/format.md</c> §2.2 and §3.5. The byte that must <i>not</i> be defined has moved to
+    /// <c>0x06</c>, the first unassigned one.
     /// </summary>
     [Fact]
-    public void EncryptionMethod_DoesNotDefineTheReservedHybridByte() =>
-        Assert.False(System.Enum.IsDefined(typeof(EncryptionMethod), (EncryptionMethod)0x05));
+    public void EncryptionMethod_DefinesTheHybridByteAndNothingBeyondIt()
+    {
+        Assert.True(System.Enum.IsDefined(typeof(EncryptionMethod), (EncryptionMethod)0x05));
+
+        for (int value = 0x06; value <= 0xFF; value++)
+        {
+            Assert.False(
+                System.Enum.IsDefined(typeof(EncryptionMethod), (EncryptionMethod)value),
+                $"Method byte 0x{value:X2} is defined; §2.2 assigns 0x01–0x05 only.");
+        }
+
+        // …and 0x00 is not a method either.
+        Assert.False(System.Enum.IsDefined(typeof(EncryptionMethod), (EncryptionMethod)0x00));
+    }
 
     // --- §2.4 Cipher bytes -------------------------------------------------------------------
 
@@ -104,7 +118,7 @@ public sealed class FormatConstantsTests
     private const int CommonPrefixLength = 5; // magic (2) + method (1) + version (1) + cipher (1)
 
     /// <summary>
-    /// The four header lengths of <c>docs/format.md</c> §3, recomputed from the constants that
+    /// The five header lengths of <c>docs/format.md</c> §3, recomputed from the constants that
     /// define them. This is the offset arithmetic the spec's tables assert; if a size constant moves,
     /// the spec's stated lengths must move with it.
     /// </summary>
@@ -122,10 +136,49 @@ public sealed class FormatConstantsTests
         // Argon2: prefix + nonce + salt + iterations + parallelism + memory + tag
         Assert.Equal(61, CommonPrefixLength + nonce + salt + (3 * int32) + kcTag);
 
-        // RSA: prefix + nonce + wrapped-key length + tag  (+ N)
-        Assert.Equal(37, CommonPrefixLength + nonce + int32 + kcTag);
+        // RSA: prefix + OAEP hash + nonce + wrapped-key length + tag  (+ N)
+        Assert.Equal(38, CommonPrefixLength + 1 + nonce + int32 + kcTag);
 
         // ML-KEM: prefix + parameter set + nonce + encapsulation length + tag  (+ N)
         Assert.Equal(38, CommonPrefixLength + 1 + nonce + int32 + kcTag);
+
+        // Hybrid: prefix + parameter set + nonce + *two* length fields + tag  (+ N + M)
+        Assert.Equal(42, CommonPrefixLength + 1 + nonce + (2 * int32) + kcTag);
+    }
+
+    // --- §3.5.1 The hybrid key combiner --------------------------------------------------------
+
+    /// <summary>
+    /// The two combiner labels, transcribed from §3.5.1 as the hex the specification prints. They are
+    /// unreachable from outside the library, so this asserts the bytes the spec commits to rather than the
+    /// constants — an accidental edit to either label changes every hybrid container ever written.
+    /// </summary>
+    [Fact]
+    public void HybridCombinerLabels_MatchTheSpecification()
+    {
+        byte[] rsaLabel = System.Text.Encoding.ASCII.GetBytes("Enigma.DataEncryption/hybrid/rsa/v1");
+        byte[] mlKemLabel = System.Text.Encoding.ASCII.GetBytes("Enigma.DataEncryption/hybrid/mlkem/v1");
+
+        Assert.Equal(35, rsaLabel.Length);
+        Assert.Equal(37, mlKemLabel.Length);
+
+        Assert.Equal<byte[]>(
+            [
+                0x45, 0x6E, 0x69, 0x67, 0x6D, 0x61, 0x2E, 0x44, 0x61, 0x74, 0x61, 0x45, 0x6E, 0x63, 0x72,
+                0x79, 0x70, 0x74, 0x69, 0x6F, 0x6E, 0x2F, 0x68, 0x79, 0x62, 0x72, 0x69, 0x64, 0x2F, 0x72,
+                0x73, 0x61, 0x2F, 0x76, 0x31,
+            ],
+            rsaLabel);
+
+        Assert.Equal<byte[]>(
+            [
+                0x45, 0x6E, 0x69, 0x67, 0x6D, 0x61, 0x2E, 0x44, 0x61, 0x74, 0x61, 0x45, 0x6E, 0x63, 0x72,
+                0x79, 0x70, 0x74, 0x69, 0x6F, 0x6E, 0x2F, 0x68, 0x79, 0x62, 0x72, 0x69, 0x64, 0x2F, 0x6D,
+                0x6C, 0x6B, 0x65, 0x6D, 0x2F, 0x76, 0x31,
+            ],
+            mlKemLabel);
+
+        // The domain separation the whole construction leans on: two labels, and they differ.
+        Assert.NotEqual(rsaLabel, mlKemLabel);
     }
 }

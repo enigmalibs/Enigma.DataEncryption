@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.IO;
 using System.Security.Cryptography;
 using System.Threading.Tasks;
+using Enigma.DataEncryption.Internal;
 using Enigma.DataEncryption.UnitTests.Internal;
 using Xunit;
 
@@ -10,7 +11,7 @@ namespace Enigma.DataEncryption.UnitTests.Services;
 
 /// <summary>
 /// The cross-cutting malformed-input sweep: a generated matrix of corrupted and truncated containers,
-/// driven through all four services, asserting that <b>every</b> outcome is one of the two container
+/// driven through all five services, asserting that <b>every</b> outcome is one of the two container
 /// exception types and never anything else.
 /// </summary>
 /// <remarks>
@@ -43,7 +44,7 @@ public sealed class MalformedContainerSweepTests
 
     private static readonly ConcurrentDictionary<ContainerMethodKind, Task<byte[]>> Containers = new();
 
-    /// <summary>The four methods.</summary>
+    /// <summary>The five methods.</summary>
     /// <returns>The theory data.</returns>
     public static TheoryData<ContainerMethodKind> Methods() => [.. ContainerMethodHarness.All];
 
@@ -85,8 +86,8 @@ public sealed class MalformedContainerSweepTests
 
     /// <summary>
     /// <b>Every</b> method byte other than the service's own — all 255 of them, per method. That includes
-    /// the three other defined methods (a container handed to the wrong service) and the reserved
-    /// <c>0x05</c>, neither of which may be parsed as if it belonged here.
+    /// the four other defined methods (a container handed to the wrong service), none of which may be
+    /// parsed as if it belonged here.
     /// </summary>
     public static TheoryData<ContainerMethodKind, byte> EveryForeignMethodByte()
     {
@@ -184,15 +185,19 @@ public sealed class MalformedContainerSweepTests
 
     /// <summary>
     /// Every parameter-set byte other than the one written — the two other valid ones included, since a
-    /// switched parameter set changes what decapsulation expects rather than what the parser accepts.
+    /// switched parameter set changes what decapsulation expects rather than what the parser accepts. Swept
+    /// for <b>both</b> methods that carry the byte, at the offset 5 they share.
     /// </summary>
-    public static TheoryData<byte> EveryForeignParameterSetByte()
+    public static TheoryData<ContainerMethodKind, byte> EveryForeignParameterSetByte()
     {
-        TheoryData<byte> data = [];
+        TheoryData<ContainerMethodKind, byte> data = [];
         byte own = MLKemTestData.WireByteOf(ContainerMethodHarness.KemParameterSet);
-        for (int value = 0x00; value <= 0xFF; value++)
+        foreach (ContainerMethodKind kind in ContainerMethodHarness.WithParameterSetByte)
         {
-            if ((byte)value != own) data.Add((byte)value);
+            for (int value = 0x00; value <= 0xFF; value++)
+            {
+                if ((byte)value != own) data.Add(kind, (byte)value);
+            }
         }
 
         return data;
@@ -200,13 +205,44 @@ public sealed class MalformedContainerSweepTests
 
     [Theory]
     [MemberData(nameof(EveryForeignParameterSetByte))]
-    public async Task AnEditedMLKemParameterSetByteIsAContainerError(byte value)
+    public async Task AnEditedMLKemParameterSetByteIsAContainerError(ContainerMethodKind kind, byte value)
     {
-        byte[] container = await ContainerAsync(ContainerMethodKind.MLKem);
+        byte[] container = await ContainerAsync(kind);
 
         await AssertContainerErrorAsync(
-            ContainerMethodKind.MLKem,
-            FormatTestData.WithByteAt(container, MLKemTestData.ParameterSetOffset, value));
+            kind, FormatTestData.WithByteAt(container, MLKemTestData.ParameterSetOffset, value));
+    }
+
+    // --- RSA OAEP hash (§3.3) ----------------------------------------------------------------------
+
+    /// <summary>
+    /// Every OAEP-hash byte other than the one written — the two other valid ones included, since a
+    /// switched hash changes what the unwrap expects rather than what the parser accepts, and the reserved
+    /// <c>0x01</c> too. Only method <c>0x03</c> carries the byte; it shares offset 5 with the parameter set
+    /// of the two methods above, which is why the sweep asserts a container error rather than a specific
+    /// exception type — an edited selector may be caught by the parser, by OAEP or by the AAD depending on
+    /// the value, and all three are documented outcomes.
+    /// </summary>
+    public static TheoryData<byte> EveryForeignOaepHashByte()
+    {
+        TheoryData<byte> data = [];
+        for (int value = 0x00; value <= 0xFF; value++)
+        {
+            if ((byte)value != RsaOaepHashWire.Sha256Byte) data.Add((byte)value);
+        }
+
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(EveryForeignOaepHashByte))]
+    public async Task AnEditedRsaOaepHashByteIsAContainerError(byte value)
+    {
+        byte[] container = await ContainerAsync(ContainerMethodKind.Rsa);
+
+        await AssertContainerErrorAsync(
+            ContainerMethodKind.Rsa,
+            FormatTestData.WithByteAt(container, RsaTestData.OaepHashOffset, value));
     }
 
     // --- Cost and length fields (§8) ---------------------------------------------------------------
@@ -251,13 +287,31 @@ public sealed class MalformedContainerSweepTests
     /// A length field inside its cap but longer than the bytes that follow it. The cap alone does not save
     /// a reader here — it has to survive the read that the announced length then fails to satisfy.
     /// </summary>
+    /// <summary>
+    /// Every variable-length field of every method that has one — which for the hybrid means both of them,
+    /// the only case where a second field's offset depends on a first field's value.
+    /// </summary>
+    public static TheoryData<ContainerMethodKind, int> EveryVariableLengthField()
+    {
+        TheoryData<ContainerMethodKind, int> data = [];
+        foreach (ContainerMethodKind kind in
+                 new[] { ContainerMethodKind.Rsa, ContainerMethodKind.MLKem, ContainerMethodKind.Hybrid })
+        {
+            foreach (ContainerMethodHarness.Int32HeaderField field in
+                     ContainerMethodHarness.For(kind).Int32Fields)
+            {
+                data.Add(kind, field.Offset);
+            }
+        }
+
+        return data;
+    }
+
     [Theory]
-    [InlineData(ContainerMethodKind.Rsa)]
-    [InlineData(ContainerMethodKind.MLKem)]
-    public async Task AnInCapLengthLongerThanTheStreamIsAContainerError(ContainerMethodKind kind)
+    [MemberData(nameof(EveryVariableLengthField))]
+    public async Task AnInCapLengthLongerThanTheStreamIsAContainerError(ContainerMethodKind kind, int offset)
     {
         byte[] container = await ContainerAsync(kind);
-        int offset = ContainerMethodHarness.For(kind).Int32Fields[0].Offset;
 
         await AssertContainerErrorAsync(kind, FormatTestData.WithInt32At(container, offset, 4_096));
     }

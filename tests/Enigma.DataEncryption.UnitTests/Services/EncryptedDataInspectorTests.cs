@@ -3,13 +3,14 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Enigma.Core.Asymmetric.Pqc;
+using Enigma.Core.Asymmetric.PublicKey;
 using Enigma.DataEncryption.UnitTests.Internal;
 using Xunit;
 
 namespace Enigma.DataEncryption.UnitTests.Services;
 
 /// <summary>
-/// The inspector: what it reports for each of the four header shapes, what it deliberately does not
+/// The inspector: what it reports for each of the five header shapes, what it deliberately does not
 /// report, and — the part with real consequences — where it leaves the stream.
 /// </summary>
 /// <remarks>
@@ -37,10 +38,9 @@ public sealed class EncryptedDataInspectorTests
     private static Task<EncryptedDataHeader> ReadAsync(Stream input, DataEncryptionLimits? limits = null) =>
         Inspector.ReadHeaderAsync(input, limits, TestContext.Current.CancellationToken);
 
-    /// <summary>The four header shapes.</summary>
+    /// <summary>The five header shapes.</summary>
     /// <returns>The theory data.</returns>
-    public static TheoryData<HeaderShape> Shapes() =>
-        [HeaderShape.Pbkdf2, HeaderShape.Argon2, HeaderShape.Rsa, HeaderShape.MLKem];
+    public static TheoryData<HeaderShape> Shapes() => [.. FormatTestData.AllShapes];
 
     // --- What it reports ---------------------------------------------------------------------------
 
@@ -110,6 +110,45 @@ public sealed class EncryptedDataInspectorTests
         EncryptedDataHeader parsed = await ReadAsync(input);
 
         Assert.Equal(FormatTestData.RsaWrappedKeyLength, parsed.WrappedKeyLength);
+        Assert.Equal(FormatTestData.RsaFixtureOaepHash, parsed.RsaOaepHash);
+    }
+
+    /// <summary>
+    /// The inspector reports the OAEP hash for every accepted value, without a credential — which is the
+    /// point of it being a header field rather than a caller argument (<c>docs/format.md</c> §3.3).
+    /// </summary>
+    [Theory]
+    [InlineData(RsaOaepHash.Sha256)]
+    [InlineData(RsaOaepHash.Sha384)]
+    [InlineData(RsaOaepHash.Sha512)]
+    public async Task TheOaepHashIsReported(RsaOaepHash oaepHash)
+    {
+        byte[] header = await RsaTestData.BuildHeaderAsync(
+            FormatTestData.WrappedKey(), FormatTestData.DataKey(), Cipher.Aes256Gcm, oaepHash);
+        using MemoryStream input = new(header, writable: false);
+
+        EncryptedDataHeader parsed = await ReadAsync(input);
+
+        Assert.Equal(EncryptionMethod.Rsa, parsed.Method);
+        Assert.Equal(oaepHash, parsed.RsaOaepHash);
+    }
+
+    /// <summary>
+    /// An inspector rejects a container whose hash byte is invalid, exactly as it rejects an undefined
+    /// cipher or parameter-set byte — the format half of §9 is all a header-only reader can raise.
+    /// </summary>
+    [Theory]
+    [InlineData(0x00)]
+    [InlineData(0x01)]
+    [InlineData(0x05)]
+    [InlineData(0xFF)]
+    public async Task AnInvalidOaepHashByteIsAFormatError(byte hashByte)
+    {
+        byte[] header = FormatTestData.WithByteAt(
+            await FormatTestData.BuildHeaderAsync(HeaderShape.Rsa), 5, hashByte);
+        using MemoryStream input = new(header, writable: false);
+
+        await Assert.ThrowsAsync<DataEncryptionFormatException>(() => ReadAsync(input));
     }
 
     [Fact]
@@ -147,13 +186,46 @@ public sealed class EncryptedDataInspectorTests
             Assert.Null(parsed.Argon2DegreeOfParallelism);
         }
 
-        if (shape != HeaderShape.Rsa) Assert.Null(parsed.WrappedKeyLength);
+        // The hybrid shares the RSA method's wrapped-key length and the ML-KEM method's parameter set and
+        // encapsulation length, so it is the one shape for which none of the three is null.
+        if (shape is not (HeaderShape.Rsa or HeaderShape.Hybrid)) Assert.Null(parsed.WrappedKeyLength);
 
-        if (shape != HeaderShape.MLKem)
+        if (shape is not (HeaderShape.MLKem or HeaderShape.Hybrid))
         {
             Assert.Null(parsed.MLKemParameterSet);
             Assert.Null(parsed.EncapsulationLength);
         }
+
+        // The OAEP hash is method 0x03's alone — the hybrid also wraps under OAEP, but at a hash the format
+        // fixes rather than records, so no container carries the field for it (docs/format.md §4).
+        if (shape != HeaderShape.Rsa) Assert.Null(parsed.RsaOaepHash);
+    }
+
+    /// <summary>
+    /// The hybrid is the only shape that reports all three method-specific fields at once, so what it
+    /// reports is asserted positively rather than only as "not null".
+    /// </summary>
+    [Fact]
+    public async Task TheHybridReportsBothLengthsAndTheParameterSet()
+    {
+        byte[] header = await FormatTestData.BuildHeaderAsync(HeaderShape.Hybrid);
+        using MemoryStream input = new(header, writable: false);
+
+        EncryptedDataHeader parsed = await ReadAsync(input);
+
+        Assert.Equal(EncryptionMethod.Hybrid, parsed.Method);
+        Assert.Equal(FormatTestData.RsaWrappedKeyLength, parsed.WrappedKeyLength);
+        Assert.Equal(FormatTestData.MLKemEncapsulationLength, parsed.EncapsulationLength);
+        Assert.Equal(FormatTestData.MLKemFixtureParameterSet, parsed.MLKemParameterSet);
+
+        // HeaderLength is 42 + N + M, so it is the one length a caller cannot compute from one field alone.
+        Assert.Equal(
+            42 + FormatTestData.RsaWrappedKeyLength + FormatTestData.MLKemEncapsulationLength,
+            parsed.HeaderLength);
+
+        Assert.Null(parsed.Pbkdf2Iterations);
+        Assert.Null(parsed.Argon2Iterations);
+        Assert.Null(parsed.RsaOaepHash);
     }
 
     // --- Real containers ---------------------------------------------------------------------------
@@ -230,7 +302,7 @@ public sealed class EncryptedDataInspectorTests
         Assert.Equal(plaintext, output.ToArray());
     }
 
-    /// <summary>The four methods.</summary>
+    /// <summary>The five methods.</summary>
     /// <returns>The theory data.</returns>
     public static TheoryData<ContainerMethodKind> Methods() => [.. ContainerMethodHarness.All];
 
@@ -402,10 +474,7 @@ public sealed class EncryptedDataInspectorTests
     public static TheoryData<HeaderShape, int> EveryTruncation()
     {
         TheoryData<HeaderShape, int> data = [];
-        foreach (HeaderShape shape in new[]
-                 {
-                     HeaderShape.Pbkdf2, HeaderShape.Argon2, HeaderShape.Rsa, HeaderShape.MLKem,
-                 })
+        foreach (HeaderShape shape in FormatTestData.AllShapes)
         {
             for (int length = 0; length < FormatTestData.HeaderLengthOf(shape); length++)
             {
@@ -430,17 +499,18 @@ public sealed class EncryptedDataInspectorTests
     }
 
     /// <summary>
-    /// Every value of the method byte, the version byte and the ML-KEM parameter-set byte that the
-    /// inspector must refuse. It accepts any of the four methods, so only genuinely undefined values are
-    /// swept here.
+    /// Every value of the method byte, the version byte, the cipher byte, the ML-KEM parameter-set byte and
+    /// the RSA OAEP-hash byte that the inspector must refuse. It accepts any of the five methods, so only
+    /// genuinely undefined values are swept here — plus the one *reserved* value, OAEP-SHA-1.
     /// </summary>
     public static TheoryData<HeaderShape, int, byte> UndefinedBytes()
     {
         TheoryData<HeaderShape, int, byte> data = [];
 
-        // Method byte: 0x00, the reserved 0x05, and everything above it.
+        // Method byte: 0x00 and everything above the last assigned one. 0x05 is no longer among them —
+        // it is the hybrid method now, so the inspector reads it rather than refusing it.
         data.Add(HeaderShape.Pbkdf2, 2, 0x00);
-        for (int value = 0x05; value <= 0xFF; value++)
+        for (int value = 0x06; value <= 0xFF; value++)
         {
             data.Add(HeaderShape.Pbkdf2, 2, (byte)value);
         }
@@ -464,10 +534,23 @@ public sealed class EncryptedDataInspectorTests
 
         // ML-KEM parameter-set byte: 0x00 matters most — the wire encoding is 1-based so that a
         // zero-filled header cannot parse.
-        data.Add(HeaderShape.MLKem, 5, 0x00);
-        for (int value = 0x04; value <= 0xFF; value++)
+        foreach (HeaderShape shape in new[] { HeaderShape.MLKem, HeaderShape.Hybrid })
         {
-            data.Add(HeaderShape.MLKem, 5, (byte)value);
+            data.Add(shape, 5, 0x00);
+            for (int value = 0x04; value <= 0xFF; value++)
+            {
+                data.Add(shape, 5, (byte)value);
+            }
+        }
+
+        // RSA OAEP-hash byte, at the same offset 5: 0x00, the reserved 0x01, and everything from 0x05 up.
+        // 0x01 is the one value here that is *reserved* rather than undefined, and it is refused all the
+        // same — a reader of format version 0x10 accepts no OAEP-SHA-1 container (§10).
+        data.Add(HeaderShape.Rsa, 5, 0x00);
+        data.Add(HeaderShape.Rsa, 5, 0x01);
+        for (int value = 0x05; value <= 0xFF; value++)
+        {
+            data.Add(HeaderShape.Rsa, 5, (byte)value);
         }
 
         return data;

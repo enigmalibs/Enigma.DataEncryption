@@ -4,6 +4,7 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Enigma.Core.Asymmetric.Pqc;
+using Enigma.Core.Asymmetric.PublicKey;
 using Enigma.Core.Hashing.Hmac;
 using Enigma.Core.KeyDerivation;
 using Enigma.Core.Symmetric.BlockCiphers;
@@ -12,7 +13,7 @@ using Xunit;
 namespace Enigma.DataEncryption.UnitTests.Services;
 
 /// <summary>
-/// The twelve file-path wrappers, against real files: that they round-trip, that they overwrite, and —
+/// The fourteen file-path wrappers, against real files: that they round-trip, that they overwrite, and —
 /// the one with consequences — that a failure leaves no output file behind.
 /// </summary>
 /// <remarks>
@@ -30,7 +31,7 @@ namespace Enigma.DataEncryption.UnitTests.Services;
 /// </remarks>
 public sealed class DataEncryptionFileExtensionsTests
 {
-    /// <summary>The four methods.</summary>
+    /// <summary>The five methods.</summary>
     /// <returns>The theory data.</returns>
     public static TheoryData<ContainerMethodKind> Methods() => [.. ContainerMethodHarness.All];
 
@@ -206,6 +207,81 @@ public sealed class DataEncryptionFileExtensionsTests
         Assert.Equal(plaintext, File.ReadAllBytes(recoveredPath));
     }
 
+    /// <summary>
+    /// The RSA wrapper honours the OAEP hash it is given, records it in the header, and round-trips through
+    /// a <c>DecryptFileAsync</c> that takes no hash of its own — the hash comes from the file.
+    /// </summary>
+    [Theory]
+    [InlineData(RsaOaepHash.Sha256, 0x02)]
+    [InlineData(RsaOaepHash.Sha384, 0x03)]
+    [InlineData(RsaOaepHash.Sha512, 0x04)]
+    public async Task TheRsaWrapperHonoursTheOaepHash(RsaOaepHash oaepHash, byte expectedWireByte)
+    {
+        IRsaDataEncryptionService service = RsaTestData.Service();
+        byte[] plaintext = ContainerFixtures.Plaintext(200);
+
+        using TempWorkspace workspace = new();
+        string plainPath = workspace.WriteFile("plain.bin", plaintext);
+        string containerPath = workspace.PathFor("container.enc");
+        string recoveredPath = workspace.PathFor("recovered.bin");
+
+        await service.EncryptFileAsync(
+            plainPath, containerPath, Cipher.Aes256Gcm, RsaTestData.GoldenPublicKeyPem(), oaepHash,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal(expectedWireByte, File.ReadAllBytes(containerPath)[RsaTestData.OaepHashOffset]);
+
+        await service.DecryptFileAsync(
+            containerPath, recoveredPath, RsaTestData.GoldenPrivateKeyPem(),
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal(plaintext, File.ReadAllBytes(recoveredPath));
+    }
+
+    /// <summary>
+    /// Omitting the argument selects SHA-256 — so a caller written before the parameter existed keeps
+    /// producing the same containers.
+    /// </summary>
+    [Fact]
+    public async Task TheRsaWrapperDefaultsToSha256()
+    {
+        IRsaDataEncryptionService service = RsaTestData.Service();
+
+        using TempWorkspace workspace = new();
+        string plainPath = workspace.WriteFile("plain.bin", ContainerFixtures.Plaintext(64));
+        string containerPath = workspace.PathFor("container.enc");
+
+        await service.EncryptFileAsync(
+            plainPath, containerPath, Cipher.Aes256Gcm, RsaTestData.GoldenPublicKeyPem(),
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal(0x02, File.ReadAllBytes(containerPath)[RsaTestData.OaepHashOffset]);
+    }
+
+    /// <summary>
+    /// A wrap that fails because the key is too small for the hash still deletes the partial output — the
+    /// cleanup path, reached through an <see cref="ArgumentException"/> raised inside the operation rather
+    /// than by the extension's own validation.
+    /// </summary>
+    [Fact]
+    public async Task ATooSmallKeyLeavesNoOutputFileBehind()
+    {
+        IRsaDataEncryptionService service = RsaTestData.Service();
+        (string publicKeyPem, _) = new PublicKeyServiceFactory().CreatePublicKeyService()
+            .GenerateRsaKeyPair(1024);
+
+        using TempWorkspace workspace = new();
+        string plainPath = workspace.WriteFile("plain.bin", ContainerFixtures.Plaintext(64));
+        string containerPath = workspace.PathFor("container.enc");
+
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => service.EncryptFileAsync(
+                plainPath, containerPath, Cipher.Aes256Gcm, publicKeyPem, RsaOaepHash.Sha512,
+                cancellationToken: TestContext.Current.CancellationToken));
+
+        Assert.False(File.Exists(containerPath), "The partial output file survived a failed wrap.");
+    }
+
     /// <summary>The ML-KEM wrapper honours the parameter set it is given, and records it in the header.</summary>
     [Theory]
     [InlineData(MLKemParameterSet.MLKem512, "512")]
@@ -231,6 +307,49 @@ public sealed class DataEncryptionFileExtensionsTests
 
         byte[] container = File.ReadAllBytes(containerPath);
         Assert.Equal(MLKemTestData.WireByteOf(parameterSet), container[MLKemTestData.ParameterSetOffset]);
+    }
+
+    /// <summary>
+    /// The hybrid wrapper honours the parameter set it is given, records it in the header, and needs
+    /// <b>both</b> credentials on the way back — the only wrapper pair that takes two.
+    /// </summary>
+    [Theory]
+    [InlineData(MLKemParameterSet.MLKem512, "512")]
+    [InlineData(MLKemParameterSet.MLKem1024, "1024")]
+    public async Task TheHybridWrapperHonoursTheParameterSetAndNeedsBothKeys(
+        MLKemParameterSet parameterSet,
+        string slug)
+    {
+        IHybridDataEncryptionService service = HybridTestData.Service();
+        byte[] plaintext = ContainerFixtures.Plaintext(64);
+
+        using TempWorkspace workspace = new();
+        string plainPath = workspace.WriteFile("plain.bin", plaintext);
+        string containerPath = workspace.PathFor("container.enc");
+        string recoveredPath = workspace.PathFor("recovered.bin");
+
+        await service.EncryptFileAsync(
+            plainPath, containerPath, Cipher.Aes256Gcm, RsaTestData.GoldenPublicKeyPem(),
+            MLKemTestData.GoldenPublicKey(slug), parameterSet,
+            cancellationToken: TestContext.Current.CancellationToken);
+        await service.DecryptFileAsync(
+            containerPath, recoveredPath, RsaTestData.GoldenPrivateKeyPem(),
+            MLKemTestData.GoldenPrivateKey(slug),
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal(plaintext, File.ReadAllBytes(recoveredPath));
+
+        byte[] container = File.ReadAllBytes(containerPath);
+        Assert.Equal(
+            MLKemTestData.WireByteOf(parameterSet), container[HybridTestData.ParameterSetOffset]);
+
+        // An encrypted RSA PEM works through the wrapper too, given its passphrase.
+        string viaEncryptedPem = workspace.PathFor("via-encrypted-pem.bin");
+        await service.DecryptFileAsync(
+            containerPath, viaEncryptedPem, RsaTestData.GoldenEncryptedPrivateKeyPem(),
+            MLKemTestData.GoldenPrivateKey(slug), RsaTestData.GoldenPemPassphraseChars(),
+            cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal(plaintext, File.ReadAllBytes(viaEncryptedPem));
     }
 
     // --- Overwrite semantics -----------------------------------------------------------------------
@@ -541,6 +660,7 @@ public sealed class DataEncryptionFileExtensionsTests
         IArgon2DataEncryptionService argon2 = new Argon2DataEncryptionService();
         IRsaDataEncryptionService rsa = new RsaDataEncryptionService();
         IMLKemDataEncryptionService kem = new MLKemDataEncryptionService();
+        IHybridDataEncryptionService hybrid = new HybridDataEncryptionService();
         const Cipher undefined = (Cipher)0x7F;
         byte[] password = PasswordTestData.PasswordBytes();
 
@@ -568,6 +688,12 @@ public sealed class DataEncryptionFileExtensionsTests
         {
             _ = kem.EncryptFileAsync("in", "out", undefined, MLKemTestData.GoldenPublicKey("512"),
                 cancellationToken: CancellationToken.None);
+        });
+
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+        {
+            _ = hybrid.EncryptFileAsync("in", "out", undefined, RsaTestData.GoldenPublicKeyPem(),
+                MLKemTestData.GoldenPublicKey("512"), cancellationToken: CancellationToken.None);
         });
     }
 
@@ -631,6 +757,66 @@ public sealed class DataEncryptionFileExtensionsTests
             }).ParamName);
     }
 
+    [Fact]
+    public void TheHybridWrapperRejectsAnUndefinedParameterSet()
+    {
+        IHybridDataEncryptionService hybrid = new HybridDataEncryptionService();
+
+        Assert.Equal(
+            "parameterSet",
+            Assert.Throws<ArgumentOutOfRangeException>(() =>
+            {
+                _ = hybrid.EncryptFileAsync(
+                    "in", "out", Cipher.Aes256Gcm, RsaTestData.GoldenPublicKeyPem(),
+                    MLKemTestData.GoldenPublicKey("512"), (MLKemParameterSet)0x40,
+                    cancellationToken: CancellationToken.None);
+            }).ParamName);
+    }
+
+    /// <summary>
+    /// The hybrid wrapper validates <b>both</b> credentials before either file is opened, and names whichever
+    /// one is at fault — the only wrapper pair where a caller can get one of two keys wrong.
+    /// </summary>
+    [Fact]
+    public void TheHybridWrapperRejectsEitherEmptyCredential()
+    {
+        IHybridDataEncryptionService hybrid = new HybridDataEncryptionService();
+        byte[] kemKey = MLKemTestData.GoldenPublicKey("512");
+        string rsaPem = RsaTestData.GoldenPublicKeyPem();
+
+        Assert.Equal(
+            "rsaPublicKeyPem",
+            Assert.Throws<ArgumentException>(() =>
+            {
+                _ = hybrid.EncryptFileAsync("in", "out", Cipher.Aes256Gcm, string.Empty, kemKey,
+                    cancellationToken: CancellationToken.None);
+            }).ParamName);
+
+        Assert.Equal(
+            "mlKemPublicKey",
+            Assert.Throws<ArgumentException>(() =>
+            {
+                _ = hybrid.EncryptFileAsync("in", "out", Cipher.Aes256Gcm, rsaPem, [],
+                    cancellationToken: CancellationToken.None);
+            }).ParamName);
+
+        Assert.Equal(
+            "rsaPrivateKeyPem",
+            Assert.Throws<ArgumentException>(() =>
+            {
+                _ = hybrid.DecryptFileAsync("in", "out", string.Empty,
+                    MLKemTestData.GoldenPrivateKey("512"), cancellationToken: CancellationToken.None);
+            }).ParamName);
+
+        Assert.Equal(
+            "mlKemPrivateKey",
+            Assert.Throws<ArgumentException>(() =>
+            {
+                _ = hybrid.DecryptFileAsync("in", "out", RsaTestData.GoldenPrivateKeyPem(), [],
+                    cancellationToken: CancellationToken.None);
+            }).ParamName);
+    }
+
     // --- Progress ----------------------------------------------------------------------------------
 
     /// <summary>
@@ -689,7 +875,7 @@ public sealed class DataEncryptionFileExtensionsTests
 
     // --- The invocation tables ---------------------------------------------------------------------
 
-    /// <summary>All twelve wrappers, invoked with a null receiver.</summary>
+    /// <summary>All fourteen wrappers, invoked with a null receiver.</summary>
     /// <returns>One thunk per wrapper.</returns>
     private static IEnumerable<Func<Task>> NullReceiverInvocations()
     {
@@ -697,6 +883,7 @@ public sealed class DataEncryptionFileExtensionsTests
         IArgon2DataEncryptionService? argon2 = null;
         IRsaDataEncryptionService? rsa = null;
         IMLKemDataEncryptionService? kem = null;
+        IHybridDataEncryptionService? hybrid = null;
 
         byte[] password = PasswordTestData.PasswordBytes();
         char[] passwordChars = PasswordTestData.PasswordChars();
@@ -718,9 +905,13 @@ public sealed class DataEncryptionFileExtensionsTests
         yield return () => rsa!.DecryptFileAsync("in", "out", privateKeyPem, cancellationToken: none);
         yield return () => kem!.EncryptFileAsync("in", "out", Cipher.Aes256Gcm, kemPublicKey, cancellationToken: none);
         yield return () => kem!.DecryptFileAsync("in", "out", kemPrivateKey, cancellationToken: none);
+        yield return () => hybrid!.EncryptFileAsync(
+            "in", "out", Cipher.Aes256Gcm, publicKeyPem, kemPublicKey, cancellationToken: none);
+        yield return () => hybrid!.DecryptFileAsync(
+            "in", "out", privateKeyPem, kemPrivateKey, cancellationToken: none);
     }
 
-    /// <summary>All twelve wrappers, parameterised by the two paths.</summary>
+    /// <summary>All fourteen wrappers, parameterised by the two paths.</summary>
     /// <returns>One thunk per wrapper.</returns>
     private static IEnumerable<Func<string, string, Task>> PathInvocations()
     {
@@ -728,6 +919,7 @@ public sealed class DataEncryptionFileExtensionsTests
         IArgon2DataEncryptionService argon2 = new Argon2DataEncryptionService();
         IRsaDataEncryptionService rsa = new RsaDataEncryptionService();
         IMLKemDataEncryptionService kem = new MLKemDataEncryptionService();
+        IHybridDataEncryptionService hybrid = new HybridDataEncryptionService();
 
         byte[] password = PasswordTestData.PasswordBytes();
         char[] passwordChars = PasswordTestData.PasswordChars();
@@ -749,5 +941,9 @@ public sealed class DataEncryptionFileExtensionsTests
         yield return (i, o) => rsa.DecryptFileAsync(i, o, privateKeyPem, cancellationToken: none);
         yield return (i, o) => kem.EncryptFileAsync(i, o, Cipher.Aes256Gcm, kemPublicKey, cancellationToken: none);
         yield return (i, o) => kem.DecryptFileAsync(i, o, kemPrivateKey, cancellationToken: none);
+        yield return (i, o) => hybrid.EncryptFileAsync(
+            i, o, Cipher.Aes256Gcm, publicKeyPem, kemPublicKey, cancellationToken: none);
+        yield return (i, o) => hybrid.DecryptFileAsync(
+            i, o, privateKeyPem, kemPrivateKey, cancellationToken: none);
     }
 }

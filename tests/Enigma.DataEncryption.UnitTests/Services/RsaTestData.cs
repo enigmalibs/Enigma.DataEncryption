@@ -21,33 +21,40 @@ namespace Enigma.DataEncryption.UnitTests.Services;
 /// </remarks>
 internal static class RsaTestData
 {
+    /// <summary>Header offset of the OAEP-hash byte.</summary>
+    internal const int OaepHashOffset = 5;
+
     /// <summary>Header offset of the 12-byte GCM nonce.</summary>
-    internal const int NonceOffset = 5;
+    internal const int NonceOffset = 6;
 
     /// <summary>Header offset of the little-endian wrapped-key length.</summary>
-    internal const int WrappedKeyLengthOffset = 17;
+    internal const int WrappedKeyLengthOffset = 18;
 
     /// <summary>Header offset of the wrapped key itself.</summary>
-    internal const int WrappedKeyOffset = 21;
+    internal const int WrappedKeyOffset = 22;
 
     /// <summary>The wrapped-key length an RSA-2048 key produces — the modulus size in bytes.</summary>
     internal const int WrappedKeyLength2048 = 256;
 
-    /// <summary>The total header length for an RSA-2048 container: 37 + 256.</summary>
+    /// <summary>The total header length for an RSA-2048 container: 38 + 256.</summary>
     internal const int HeaderLength2048 = FormatLayout.RsaHeaderBaseLength + WrappedKeyLength2048;
 
     /// <summary>The passphrase protecting the committed encrypted private-key PEM.</summary>
     internal const string GoldenPemPassphrase = "enigma-test-pem-passphrase";
 
+    /// <summary>The three OAEP hashes the format accepts, for the theories that sweep them.</summary>
+    internal static RsaOaepHash[] AllOaepHashes =>
+        [RsaOaepHash.Sha256, RsaOaepHash.Sha384, RsaOaepHash.Sha512];
+
     /// <summary>The total header length of an RSA container, per <c>docs/format.md</c> §3.3.</summary>
     /// <param name="wrappedKeyLength">The wrapped-key length <c>N</c>.</param>
-    /// <returns>37 + <paramref name="wrappedKeyLength"/>.</returns>
+    /// <returns>38 + <paramref name="wrappedKeyLength"/>.</returns>
     internal static int HeaderLength(int wrappedKeyLength) =>
         FormatLayout.RsaHeaderBaseLength + wrappedKeyLength;
 
     /// <summary>Header offset of the key-confirmation tag, for a given wrapped-key length.</summary>
     /// <param name="wrappedKeyLength">The wrapped-key length <c>N</c>.</param>
-    /// <returns>21 + <paramref name="wrappedKeyLength"/>.</returns>
+    /// <returns>22 + <paramref name="wrappedKeyLength"/>.</returns>
     internal static int KeyConfirmationTagOffset(int wrappedKeyLength) =>
         WrappedKeyOffset + wrappedKeyLength;
 
@@ -81,12 +88,13 @@ internal static class RsaTestData
         string publicKeyPem,
         byte[] plaintext,
         Cipher cipher = Cipher.Aes256Gcm,
-        RsaDataEncryptionService? service = null)
+        RsaDataEncryptionService? service = null,
+        RsaOaepHash oaepHash = RsaOaepHash.Sha256)
     {
         using MemoryStream input = new(plaintext, writable: false);
         using MemoryStream output = new();
         await (service ?? Service()).EncryptAsync(
-            input, output, cipher, publicKeyPem, null, CancellationToken.None);
+            input, output, cipher, publicKeyPem, oaepHash, null, CancellationToken.None);
         return output.ToArray();
     }
 
@@ -114,7 +122,7 @@ internal static class RsaTestData
     /// <summary>The wrapped-key bytes carried by a container.</summary>
     /// <param name="container">The container bytes.</param>
     /// <param name="wrappedKeyLength">The wrapped-key length <c>N</c>.</param>
-    /// <returns>The <c>N</c> bytes at offset 21.</returns>
+    /// <returns>The <c>N</c> bytes at offset 22.</returns>
     internal static byte[] WrappedKeyOf(byte[] container, int wrappedKeyLength = WrappedKeyLength2048) =>
         container[WrappedKeyOffset..(WrappedKeyOffset + wrappedKeyLength)];
 
@@ -155,16 +163,19 @@ internal static class RsaTestData
     /// <param name="wrappedKey">The wrapped-key bytes to embed.</param>
     /// <param name="dataKey">The key the confirmation tag is computed under.</param>
     /// <param name="cipher">The cipher byte to record.</param>
+    /// <param name="oaepHash">The OAEP hash to record at offset 5.</param>
     /// <returns>The complete header bytes.</returns>
     internal static async Task<byte[]> BuildHeaderAsync(
         byte[] wrappedKey,
         byte[] dataKey,
-        Cipher cipher = Cipher.Aes256Gcm)
+        Cipher cipher = Cipher.Aes256Gcm,
+        RsaOaepHash oaepHash = RsaOaepHash.Sha256)
     {
         using MemoryStream output = new();
         return await HeaderWriter.WriteRsaHeaderAsync(
             output,
             cipher,
+            oaepHash,
             FormatTestData.Nonce(),
             wrappedKey,
             dataKey,
@@ -175,19 +186,28 @@ internal static class RsaTestData
     /// <summary>Wraps arbitrary bytes under a public key with the same OAEP parameters the format uses.</summary>
     /// <param name="data">The bytes to wrap.</param>
     /// <param name="publicKeyPem">The recipient's public key.</param>
+    /// <param name="oaepHash">The OAEP padding hash.</param>
     /// <returns>The OAEP ciphertext.</returns>
-    internal static byte[] WrapOaep(byte[] data, string publicKeyPem) =>
+    internal static byte[] WrapOaep(
+        byte[] data,
+        string publicKeyPem,
+        RsaOaepHash oaepHash = RsaOaepHash.Sha256) =>
         new PublicKeyServiceFactory().CreatePublicKeyService()
-            .EncryptOaep(data, publicKeyPem, RsaOaepHash.Sha256);
+            .EncryptOaep(data, publicKeyPem, oaepHash);
 
     /// <summary>Unwraps with the same OAEP parameters the format uses.</summary>
     /// <param name="wrappedKey">The OAEP ciphertext.</param>
     /// <param name="privateKeyPem">The recipient's private key.</param>
     /// <param name="keyPassword">The passphrase protecting the PEM, if any.</param>
+    /// <param name="oaepHash">The OAEP padding hash.</param>
     /// <returns>The recovered bytes.</returns>
-    internal static byte[] UnwrapOaep(byte[] wrappedKey, string privateKeyPem, char[]? keyPassword = null) =>
+    internal static byte[] UnwrapOaep(
+        byte[] wrappedKey,
+        string privateKeyPem,
+        char[]? keyPassword = null,
+        RsaOaepHash oaepHash = RsaOaepHash.Sha256) =>
         new PublicKeyServiceFactory().CreatePublicKeyService()
-            .DecryptOaep(wrappedKey, privateKeyPem, RsaOaepHash.Sha256, keyPassword);
+            .DecryptOaep(wrappedKey, privateKeyPem, oaepHash, keyPassword);
 
     /// <summary>All four ciphers, for the theories that sweep them.</summary>
     internal static Cipher[] AllCiphers =>

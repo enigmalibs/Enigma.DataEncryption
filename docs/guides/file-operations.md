@@ -1,8 +1,8 @@
 # File operations
 
-`DataEncryptionFileExtensions` provides file-path wrappers over the stream-based services: twelve
+`DataEncryptionFileExtensions` provides file-path wrappers over the stream-based services: fourteen
 extension methods that open the two files, run the operation, and clean up after a failure. You call them
-on any of the four encryption service interfaces — `service.EncryptFileAsync(inputPath, outputPath, …)` —
+on any of the five encryption service interfaces — `service.EncryptFileAsync(inputPath, outputPath, …)` —
 and they delegate to the same `EncryptAsync` / `DecryptAsync` you would have called yourself.
 
 There is no new cryptography here and no new behaviour beyond file handling. Argument validation, credential
@@ -14,8 +14,8 @@ compose with any implementation — including a test double.
 
 ## Supported operations
 
-Twelve methods: four per password method (encrypt and decrypt, each with a `byte[]` and a `char[]`
-password overload), and two each for RSA and ML-KEM.
+Fourteen methods: four per password method (encrypt and decrypt, each with a `byte[]` and a `char[]`
+password overload), and two each for RSA, ML-KEM and the hybrid.
 
 | Service interface | Method | Credential parameter |
 |-------------------|--------|----------------------|
@@ -27,17 +27,22 @@ password overload), and two each for RSA and ML-KEM.
 | `IArgon2DataEncryptionService` | `EncryptFileAsync` | `char[] password` |
 | `IArgon2DataEncryptionService` | `DecryptFileAsync` | `byte[] password` |
 | `IArgon2DataEncryptionService` | `DecryptFileAsync` | `char[] password` |
-| `IRsaDataEncryptionService` | `EncryptFileAsync` | `string publicKeyPem` |
+| `IRsaDataEncryptionService` | `EncryptFileAsync` | `string publicKeyPem`, optional `RsaOaepHash oaepHash` |
 | `IRsaDataEncryptionService` | `DecryptFileAsync` | `string privateKeyPem`, optional `char[]? keyPassword` |
 | `IMLKemDataEncryptionService` | `EncryptFileAsync` | `byte[] publicKey`, optional `MLKemParameterSet parameterSet` |
 | `IMLKemDataEncryptionService` | `DecryptFileAsync` | `byte[] privateKey` |
+| `IHybridDataEncryptionService` | `EncryptFileAsync` | `string rsaPublicKeyPem` **and** `byte[] mlKemPublicKey`, optional `MLKemParameterSet parameterSet` |
+| `IHybridDataEncryptionService` | `DecryptFileAsync` | `string rsaPrivateKeyPem` **and** `byte[] mlKemPrivateKey`, optional `char[]? rsaKeyPassword` |
 
-Each carries the same optional parameters as its stream counterpart — the cost parameters on encrypt, the
-`DataEncryptionLimits? limits` on decrypt, and `IProgress<int>? progress` plus `CancellationToken` on both.
+Each carries the same optional parameters as its stream counterpart — the cost parameters and the algorithm
+selectors on encrypt, the `DataEncryptionLimits? limits` on decrypt, and `IProgress<int>? progress` plus
+`CancellationToken` on both. Note that the two selectors recorded in a header — the RSA `oaepHash` and the
+ML-KEM `parameterSet` — appear on `EncryptFileAsync` only: the decrypt side reads them from the container,
+so they are not parameters there.
 
 ### The three semantics
 
-Every one of the twelve shares these, and all three are load-bearing rather than incidental:
+Every one of the fourteen shares these, and all three are load-bearing rather than incidental:
 
 1. **Input** is opened `FileMode.Open`, `FileAccess.Read`, `FileShare.Read`, with a 4,096-byte buffer and
    `useAsync: true`. `FileShare.Read` means other readers may hold the file open concurrently, so you can
@@ -69,7 +74,7 @@ that deletes nothing.
 
 | Type | Namespace | Role |
 |------|-----------|------|
-| `DataEncryptionFileExtensions` | `Enigma.DataEncryption` | The static class holding all twelve methods. You never name it — the methods appear on the service interfaces. |
+| `DataEncryptionFileExtensions` | `Enigma.DataEncryption` | The static class holding all fourteen methods. You never name it — the methods appear on the service interfaces. |
 | `IPbkdf2DataEncryptionService`, `IArgon2DataEncryptionService`, `IRsaDataEncryptionService`, `IMLKemDataEncryptionService` | `Enigma.DataEncryption` | The receivers. Any implementation works. |
 | `Cipher` | `Enigma.DataEncryption` | Which 256-bit GCM cipher protects the payload. |
 | `DataEncryptionDefaults` | `Enigma.DataEncryption` | The default cost parameters, unchanged from the stream overloads. |

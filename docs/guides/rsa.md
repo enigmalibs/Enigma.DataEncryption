@@ -6,8 +6,9 @@ container), hand it an input stream, an output stream, a cipher and the recipien
 key**, and it writes a self-describing container that only the matching private key can open.
 
 RSA never touches your data. Each call generates a fresh 32-byte data key, wraps *that* under
-**RSAES-OAEP with SHA-256**, and stores the wrapped key in the header; the payload itself is encrypted
-symmetrically with the 256-bit GCM cipher you chose. So the RSA key size bounds nothing about your file —
+**RSAES-OAEP** — with SHA-256 by default, or SHA-384 or SHA-512 if you ask — and stores the wrapped key
+and the hash you chose in the header; the payload itself is encrypted symmetrically with the 256-bit GCM
+cipher you chose. So the RSA key size bounds nothing about your file —
 a 2048-bit key encrypts a terabyte as happily as a sentence — and the **complete header is passed as GCM
 associated data**, so tampering with the wrapped key or any other header byte is an authentication
 failure.
@@ -19,18 +20,19 @@ memory as encrypting a short string, because only the 32-byte data key is ever h
 
 | Operation | Method | Credential | Notes |
 |-----------|--------|------------|-------|
-| Encrypt | `EncryptAsync` | The recipient's **public** key PEM | Anyone holding the public key can produce a container. No signature is added — this gives confidentiality, not authenticity. |
-| Decrypt | `DecryptAsync` | The recipient's **private** key PEM, plus `keyPassword` if the PEM is encrypted | The wrapped key's length is read from the header, so no key size is passed in. |
+| Encrypt | `EncryptAsync` | The recipient's **public** key PEM | Anyone holding the public key can produce a container. No signature is added — this gives confidentiality, not authenticity. Takes an optional `oaepHash`. |
+| Decrypt | `DecryptAsync` | The recipient's **private** key PEM, plus `keyPassword` if the PEM is encrypted | The wrapped key's length **and the OAEP hash** are read from the header, so neither a key size nor a hash is passed in. |
 
 The public key may be a `PUBLIC KEY` or an `RSA PUBLIC KEY` PEM. The private key may be an unencrypted
 `PRIVATE KEY` PEM, or an AES-256-CBC-encrypted private-key PEM — in which case `keyPassword` is
 required, and is a `char[]` the caller owns and clears.
 
-There are no algorithm choices to make on the RSA side: the wrap is always RSAES-OAEP with SHA-256, and
-the data-key size (32 bytes), nonce size (12 bytes) and tag size (128 bits) are fixed invariants of the
-format. The only degree of freedom is `cipher`, which selects the 256-bit GCM cipher protecting the
-payload. **No public-key fingerprint is stored** — an OAEP unwrap already fails fast on the wrong key,
-and the header's key-confirmation tag covers wrong-credential detection uniformly across all four
+There are exactly **two** algorithm choices to make on the RSA side, and both are recorded in the header:
+`cipher`, which selects the 256-bit GCM cipher protecting the payload, and `oaepHash`, which selects the
+hash backing the OAEP padding. Everything else is a fixed invariant of the format — the padding scheme
+itself (always RSAES-OAEP), the data-key size (32 bytes), the nonce size (12 bytes) and the tag size
+(128 bits). **No public-key fingerprint is stored** — an OAEP unwrap already fails fast on the wrong key,
+and the header's key-confirmation tag covers wrong-credential detection uniformly across all five
 methods.
 
 ## Key types
@@ -42,7 +44,8 @@ methods.
 | `Cipher` | `Enigma.DataEncryption` | Which 256-bit GCM cipher protects the payload: `Aes256Gcm`, `Twofish256Gcm`, `Serpent256Gcm`, `Camellia256Gcm`. |
 | `DataEncryptionLimits` | `Enigma.DataEncryption` | Bounds the header's wrapped-key length before it is allocated. `MaxWrappedKeyLength` defaults to 4,096 bytes. |
 | `DataDecryptionException` | `Enigma.DataEncryption` | The private key does not open this container, or the payload failed authentication. |
-| `DataEncryptionFormatException` | `Enigma.DataEncryption` | The input is not an RSA container, or its wrapped-key length is out of bounds. |
+| `DataEncryptionFormatException` | `Enigma.DataEncryption` | The input is not an RSA container, its OAEP-hash byte is invalid, or its wrapped-key length is out of bounds. |
+| `RsaOaepHash` | `Enigma.Core.Asymmetric.PublicKey` | Which hash backs the OAEP padding: `Sha256` (the default), `Sha384`, `Sha512`. `Sha1` is declared by Enigma.Core but **rejected** by this library. |
 | `IPublicKeyService` | `Enigma.Core.Asymmetric.PublicKey` | Enigma.Core's RSA service — this is where key pairs come from. |
 | `PublicKeyServiceFactory` | `Enigma.Core.Asymmetric.PublicKey` | Concrete factory for the above. Create with `new`; implements `IPublicKeyServiceFactory`. |
 
@@ -54,6 +57,7 @@ Task EncryptAsync(
     Stream output,
     Cipher cipher,
     string publicKeyPem,
+    RsaOaepHash oaepHash = RsaOaepHash.Sha256,
     IProgress<int>? progress = null,
     CancellationToken cancellationToken = default);
 
@@ -125,6 +129,91 @@ await service.DecryptAsync(container, recovered, privateKeyPem);
 
 Console.WriteLine(Encoding.UTF8.GetString(recovered.ToArray()));  // Attack at dawn.
 ```
+
+### Choose the OAEP hash
+
+`oaepHash` selects the hash backing the OAEP padding. It defaults to `RsaOaepHash.Sha256`; `Sha384` and
+`Sha512` are the other two accepted values. The choice is recorded in the header, so **decryption takes no
+hash argument** — it reads the one the container names:
+
+```csharp
+using System;
+using System.IO;
+using System.Text;
+using System.Threading.Tasks;
+using Enigma.Core.Asymmetric.PublicKey;
+using Enigma.DataEncryption;
+
+IPublicKeyService publicKeys = new PublicKeyServiceFactory().CreatePublicKeyService();
+(string publicKeyPem, string privateKeyPem) = publicKeys.GenerateRsaKeyPair(2048);
+
+IRsaDataEncryptionService service = new RsaDataEncryptionService();
+
+using MemoryStream input = new(Encoding.UTF8.GetBytes("Attack at dawn."));
+using MemoryStream container = new();
+
+// A deployment whose policy mandates SHA-384 for key transport.
+await service.EncryptAsync(
+    input, container, Cipher.Aes256Gcm, publicKeyPem, RsaOaepHash.Sha384);
+
+container.Position = 0;
+
+using MemoryStream recovered = new();
+await service.DecryptAsync(container, recovered, privateKeyPem);  // no hash argument
+
+Console.WriteLine(Encoding.UTF8.GetString(recovered.ToArray()));  // Attack at dawn.
+```
+
+Three things to know before you reach for it.
+
+**The default is the right choice unless a policy says otherwise.** OAEP's security proof asks no
+collision resistance of its hash, so SHA-256, SHA-384 and SHA-512 are equivalent here rather than a
+ladder — this is a compliance knob, not a strength knob. If nothing mandates SHA-384 or SHA-512, leave the
+parameter off.
+
+**SHA-1 is rejected, not merely discouraged.** `RsaOaepHash.Sha1` exists on Enigma.Core's enum, and
+passing it raises `ArgumentOutOfRangeException` on `oaepHash`. The container format reserves its wire byte
+and no reader accepts it, so there is no way to produce or read an OAEP-SHA-1 container. Nothing mandates
+OAEP-SHA-1, and since no external system ever unwraps these keys, the legacy-interop argument that usually
+rescues SHA-1 does not apply.
+
+**A larger hash needs a larger key.** Wrapping the 32-byte data key needs an RSA modulus of at least
+`2·hLen + 34` bytes (RFC 8017 §7.1.1):
+
+| Hash | Minimum modulus | Smallest usable key |
+|------|-----------------|---------------------|
+| SHA-256 | 98 bytes | RSA-1024 (128 bytes) |
+| SHA-384 | 130 bytes | RSA-2048 (256 bytes) |
+| SHA-512 | 162 bytes | RSA-2048 (256 bytes) |
+
+**RSA-2048 and above accept all three**, so in practice this only bites on RSA-1024, which fails with
+SHA-384 and SHA-512. A key too small for the hash surfaces as an `ArgumentException` on `publicKeyPem`,
+with Enigma.Core's `CryptographicException` preserved as `InnerException`, and **before anything is
+written** to the output stream:
+
+```csharp
+using System;
+using System.IO;
+using System.Threading.Tasks;
+using Enigma.DataEncryption;
+
+try
+{
+    await service.EncryptAsync(
+        input, container, Cipher.Aes256Gcm, rsa1024PublicKeyPem, RsaOaepHash.Sha512);
+}
+catch (ArgumentOutOfRangeException ex)
+{
+    Console.WriteLine($"That hash is not accepted: {ex.Message}");   // e.g. Sha1
+}
+catch (ArgumentException ex)
+{
+    Console.WriteLine($"That key is too small for the hash: {ex.Message}");
+}
+```
+
+Note the order: `ArgumentOutOfRangeException` derives from `ArgumentException`, so catch the narrower one
+first if you want to tell "unacceptable hash" from "unusable key" apart.
 
 ### Work with an encrypted private-key PEM
 
@@ -272,8 +361,11 @@ var progress = new Progress<int>(bytes =>
 using CancellationTokenSource cts = new();
 
 await service.EncryptAsync(
-    input, output, Cipher.Aes256Gcm, publicKeyPem, progress, cts.Token);
+    input, output, Cipher.Aes256Gcm, publicKeyPem, RsaOaepHash.Sha256, progress, cts.Token);
 ```
+
+`progress` and `cancellationToken` follow `oaepHash`, so pass the hash explicitly — or name the arguments —
+when you supply either positionally.
 
 Cancellation surfaces as `OperationCanceledException`. For file-to-file work, prefer the extension
 methods in [File operations](file-operations.md), which delete the partial output on any failure.
@@ -283,15 +375,25 @@ methods in [File operations](file-operations.md), which delete the partial outpu
 - **This gives confidentiality, not authenticity.** Anyone with the recipient's public key can produce a
   valid container, so a successful decrypt proves the container was made for you — not who made it. Sign
   separately if you need sender authentication.
+- **This method is not quantum-resistant.** RSA falls to a sufficiently large quantum computer, so a
+  container that must stay confidential beyond that horizon should not rely on RSA alone. Use
+  [`IHybridDataEncryptionService`](hybrid.md), which combines an RSA-transported secret with an ML-KEM
+  encapsulated one so that breaking either primitive is not enough — or
+  [`IMLKemDataEncryptionService`](ml-kem.md) if you are willing to rely on the lattice assumption alone.
 - **The RSA operation covers only the 32-byte data key**, so the key size constrains nothing about the
   payload size. Choose the key size for its own reasons; 2048 bits is the practical minimum, 3072 or
   4096 for a longer horizon.
-- **The wrapped-key length equals the RSA modulus size in bytes**, so the header is 37 + 256 bytes for
-  an RSA-2048 key, 37 + 384 for 3072, and 37 + 512 for 4096. It is the one field of an RSA container
+- **The wrapped-key length equals the RSA modulus size in bytes**, so the header is 38 + 256 bytes for
+  an RSA-2048 key, 38 + 384 for 3072, and 38 + 512 for 4096 — **whichever OAEP hash you chose**, since the
+  hash changes the padding rather than the ciphertext size. It is the one field of an RSA container
   whose value varies with the credential — and, because OAEP is randomised, the wrapped-key **bytes**
   differ on every call even for identical input and key.
 - **Wrong-key detection happens before any payload byte is read.** OAEP unwrap fails fast, and where it
   succeeds the header's key-confirmation tag is verified in constant time immediately afterwards.
+- **An edited OAEP-hash byte needs no special handling.** The reader takes the hash from the header, so an
+  edit names a hash the wrap did not use and the unwrap fails — a `DataDecryptionException`, exactly as a
+  wrong key would be. An edit to an *invalid* value (including the reserved SHA-1 byte) is caught earlier
+  still, as a `DataEncryptionFormatException`, before any key operation.
 - **The input stream is read to its end** from wherever it is positioned. Position it at the start of the
   data before calling, and rewind a `MemoryStream` you have just written before decrypting it.
 - **The container stream need not be seekable on decrypt.** The header is read forward exactly once and

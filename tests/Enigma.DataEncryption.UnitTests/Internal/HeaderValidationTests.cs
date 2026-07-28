@@ -1,4 +1,5 @@
 using System.Threading.Tasks;
+using Enigma.Core.Asymmetric.PublicKey;
 using Enigma.DataEncryption.Internal;
 using Xunit;
 
@@ -6,9 +7,8 @@ namespace Enigma.DataEncryption.UnitTests.Internal;
 
 /// <summary>
 /// Covers every rejection <see cref="HeaderReader"/> owes the error mapping of <c>docs/format.md</c> §9:
-/// the magic, the method byte (including the reserved <c>0x05</c>), the version byte (including the whole
-/// reserved legacy range), the cipher byte, the ML-KEM parameter-set byte, and every cost and length
-/// field.
+/// the magic, the method byte, the version byte (including the whole reserved legacy range), the cipher
+/// byte, the ML-KEM parameter-set byte, and every cost and length field.
 /// </summary>
 public sealed class HeaderValidationTests
 {
@@ -71,36 +71,55 @@ public sealed class HeaderValidationTests
     }
 
     /// <summary>
-    /// <c>0x05</c> is reserved for the hybrid method and must be rejected by a reader of this format
-    /// version, with a message that says so rather than "undefined".
+    /// <c>0x05</c> is <b>no longer</b> reserved: it is the hybrid method, so a reader must accept it as a
+    /// method byte and then fail on the body that does not follow. Earlier revisions of the format
+    /// rejected the byte outright with a message naming the reservation, so this is what would catch the
+    /// assignment being made in the enum but not in the reader.
     /// </summary>
+    /// <remarks>
+    /// The failure it does produce is the parameter-set byte: relabelling a PBKDF2 header makes the reader
+    /// look for a parameter set at offset 5, where the nonce's first byte — <c>0x00</c> — sits. That
+    /// <c>0x00</c> is never a valid parameter set is exactly why the wire encoding is 1-based (§3.4).
+    /// </remarks>
     [Fact]
-    public async Task TheReservedHybridMethodByteIsRejectedAsReserved()
+    public async Task TheHybridMethodByteIsNoLongerRejectedAsReserved()
     {
         byte[] header = await FormatTestData.BuildHeaderAsync(HeaderShape.Pbkdf2);
 
         DataEncryptionFormatException exception = await Assert.ThrowsAsync<DataEncryptionFormatException>(
             () => FormatTestData.ReadHeaderAsync(FormatTestData.WithByteAt(header, 2, 0x05)));
 
-        Assert.Contains("reserved", exception.Message);
+        Assert.DoesNotContain("reserved", exception.Message);
+        Assert.Contains("parameter-set byte", exception.Message);
+    }
+
+    /// <summary>
+    /// And the one method byte that is genuinely absent from the enum now sits at <c>0x06</c>, where the
+    /// message must say "undefined" rather than name a method.
+    /// </summary>
+    [Fact]
+    public async Task TheFirstUnassignedMethodByteIsRejectedAsUndefined()
+    {
+        byte[] header = await FormatTestData.BuildHeaderAsync(HeaderShape.Pbkdf2);
+
+        DataEncryptionFormatException exception = await Assert.ThrowsAsync<DataEncryptionFormatException>(
+            () => FormatTestData.ReadHeaderAsync(FormatTestData.WithByteAt(header, 2, 0x06)));
+
+        Assert.Contains("Undefined container method byte 0x06", exception.Message);
     }
 
     /// <summary>
     /// Each service reads only its own method byte, so handing it another method's container is a format
-    /// error rather than a misparse — all twelve mismatched pairs.
+    /// error rather than a misparse — all twenty mismatched pairs.
     /// </summary>
     public static TheoryData<HeaderShape, EncryptionMethod> MismatchedMethods()
     {
         TheoryData<HeaderShape, EncryptionMethod> data = [];
-        foreach (HeaderShape shape in new[] { HeaderShape.Pbkdf2, HeaderShape.Argon2, HeaderShape.Rsa, HeaderShape.MLKem })
+        foreach (HeaderShape shape in FormatTestData.AllShapes)
         {
-            foreach (EncryptionMethod method in new[]
-                     {
-                         EncryptionMethod.Pbkdf2, EncryptionMethod.Argon2,
-                         EncryptionMethod.Rsa, EncryptionMethod.MLKem,
-                     })
+            foreach (HeaderShape other in FormatTestData.AllShapes)
             {
-                if (FormatTestData.MethodOf(shape) != method) data.Add(shape, method);
+                if (shape != other) data.Add(shape, FormatTestData.MethodOf(other));
             }
         }
 
@@ -117,12 +136,13 @@ public sealed class HeaderValidationTests
             () => FormatTestData.ReadHeaderAsync(header, expected));
     }
 
-    /// <summary>And the inspector, which expects no particular method, reads all four.</summary>
+    /// <summary>Every header shape.</summary>
+    /// <returns>The theory data.</returns>
+    public static TheoryData<HeaderShape> Shapes() => [.. FormatTestData.AllShapes];
+
+    /// <summary>And the inspector, which expects no particular method, reads all five.</summary>
     [Theory]
-    [InlineData(HeaderShape.Pbkdf2)]
-    [InlineData(HeaderShape.Argon2)]
-    [InlineData(HeaderShape.Rsa)]
-    [InlineData(HeaderShape.MLKem)]
+    [MemberData(nameof(Shapes))]
     public async Task NoExpectedMethodAcceptsEveryMethod(HeaderShape shape)
     {
         ParsedHeader parsed = await FormatTestData.ReadHeaderAsync(await FormatTestData.BuildHeaderAsync(shape));
@@ -197,6 +217,65 @@ public sealed class HeaderValidationTests
         await Assert.ThrowsAsync<DataEncryptionFormatException>(
             () => FormatTestData.ReadHeaderAsync(
                 FormatTestData.WithByteAt(header, 5, value), EncryptionMethod.MLKem));
+    }
+
+    // --- §3.3 RSA OAEP hash ------------------------------------------------------------------------
+
+    /// <summary>
+    /// Method <c>0x03</c>'s selector shares offset 5 with ML-KEM's and is rejected on the same terms:
+    /// <c>0x00</c> because the encoding is 1-based, and everything from <c>0x05</c> up because it is
+    /// undefined.
+    /// </summary>
+    [Theory]
+    [InlineData(0x00)]
+    [InlineData(0x05)]
+    [InlineData(0x06)]
+    [InlineData(0x7F)]
+    [InlineData(0xFF)]
+    public async Task AnUndefinedOaepHashByteIsAFormatError(byte value)
+    {
+        byte[] header = await FormatTestData.BuildHeaderAsync(HeaderShape.Rsa);
+
+        await Assert.ThrowsAsync<DataEncryptionFormatException>(
+            () => FormatTestData.ReadHeaderAsync(
+                FormatTestData.WithByteAt(header, 5, value), EncryptionMethod.Rsa));
+    }
+
+    /// <summary>
+    /// <c>0x01</c> is the one value that is <b>reserved</b> rather than undefined (<c>docs/format.md</c>
+    /// §10), and the message says so — the distinction is what makes a later un-reservation a one-line
+    /// change rather than a re-examination of what readers were told.
+    /// </summary>
+    [Fact]
+    public async Task TheReservedSha1HashByteIsRejectedAsReserved()
+    {
+        byte[] header = await FormatTestData.BuildHeaderAsync(HeaderShape.Rsa);
+
+        DataEncryptionFormatException exception = await Assert.ThrowsAsync<DataEncryptionFormatException>(
+            () => FormatTestData.ReadHeaderAsync(
+                FormatTestData.WithByteAt(header, 5, 0x01), EncryptionMethod.Rsa));
+
+        Assert.Contains("reserved", exception.Message);
+        Assert.Contains("SHA-1", exception.Message);
+    }
+
+    /// <summary>
+    /// The three accepted values parse and are reported as read — the counterpart to the rejections above,
+    /// so the theory is not merely asserting that the reader rejects everything.
+    /// </summary>
+    [Theory]
+    [InlineData(0x02, RsaOaepHash.Sha256)]
+    [InlineData(0x03, RsaOaepHash.Sha384)]
+    [InlineData(0x04, RsaOaepHash.Sha512)]
+    public async Task AnAcceptedOaepHashByteParsesAndIsReported(byte value, RsaOaepHash expected)
+    {
+        byte[] header = await FormatTestData.BuildHeaderAsync(HeaderShape.Rsa);
+
+        ParsedHeader parsed = await FormatTestData.ReadHeaderAsync(
+            FormatTestData.WithByteAt(header, 5, value), EncryptionMethod.Rsa);
+
+        Assert.Equal(expected, parsed.RsaOaepHash);
+        Assert.Equal(expected, parsed.Header.RsaOaepHash);
     }
 
     // --- §8 Cost and length fields -----------------------------------------------------------------
@@ -303,7 +382,7 @@ public sealed class HeaderValidationTests
 
         await Assert.ThrowsAsync<DataEncryptionFormatException>(
             () => FormatTestData.ReadHeaderAsync(
-                FormatTestData.WithInt32At(header, 17, length), EncryptionMethod.Rsa));
+                FormatTestData.WithInt32At(header, 18, length), EncryptionMethod.Rsa));
     }
 
     [Theory]
@@ -321,6 +400,137 @@ public sealed class HeaderValidationTests
                 FormatTestData.WithInt32At(header, 18, length), EncryptionMethod.MLKem));
     }
 
+    // --- §3.5 The hybrid's two length fields and its parameter-set byte -----------------------------
+
+    /// <summary>
+    /// The hybrid's parameter-set byte sits at the same offset 5 as ML-KEM's and is rejected on the same
+    /// terms — <c>0x00</c> included, which is what stops a zero-filled header from parsing.
+    /// </summary>
+    [Theory]
+    [InlineData(0x00)]
+    [InlineData(0x04)]
+    [InlineData(0x05)]
+    [InlineData(0xFF)]
+    public async Task AnUndefinedParameterSetByteInAHybridHeaderIsAFormatError(byte value)
+    {
+        byte[] header = await FormatTestData.BuildHeaderAsync(HeaderShape.Hybrid);
+
+        await Assert.ThrowsAsync<DataEncryptionFormatException>(
+            () => FormatTestData.ReadHeaderAsync(
+                FormatTestData.WithByteAt(header, 5, value), EncryptionMethod.Hybrid));
+    }
+
+    /// <summary>
+    /// The hybrid's <b>first</b> length field, at offset 18, bounded by the RSA cap — the hybrid adds no
+    /// cap of its own (<c>docs/format.md</c> §8).
+    /// </summary>
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(int.MinValue)]
+    [InlineData(int.MaxValue)]
+    [InlineData(4_097)]
+    public async Task AnOutOfRangeHybridWrappedSecretLengthIsAFormatError(int length)
+    {
+        byte[] header = await FormatTestData.BuildHeaderAsync(HeaderShape.Hybrid);
+
+        await Assert.ThrowsAsync<DataEncryptionFormatException>(
+            () => FormatTestData.ReadHeaderAsync(
+                FormatTestData.WithInt32At(header, 18, length), EncryptionMethod.Hybrid));
+    }
+
+    /// <summary>
+    /// The hybrid's <b>second</b> length field, whose offset is itself a function of the first field's
+    /// value: 22 + <c>N</c> = 278 for the 256-byte fixture.
+    /// </summary>
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(int.MinValue)]
+    [InlineData(int.MaxValue)]
+    [InlineData(4_097)]
+    public async Task AnOutOfRangeHybridEncapsulationLengthIsAFormatError(int length)
+    {
+        byte[] header = await FormatTestData.BuildHeaderAsync(HeaderShape.Hybrid);
+        int offset = FormatLayout.HybridEncapsulationLengthOffset(FormatTestData.RsaWrappedKeyLength);
+
+        await Assert.ThrowsAsync<DataEncryptionFormatException>(
+            () => FormatTestData.ReadHeaderAsync(
+                FormatTestData.WithInt32At(header, offset, length), EncryptionMethod.Hybrid));
+    }
+
+    /// <summary>
+    /// A reader that hard-coded ML-KEM's offset 18 for the hybrid's second length field would corrupt the
+    /// <i>first</i> length instead and fail naming the wrong field, so the two are told apart by the field
+    /// name in the message.
+    /// </summary>
+    /// <remarks>
+    /// Zero is the value that reaches <see cref="LimitsValidator"/> — and therefore the field's name — at
+    /// all: Enigma.Core's <c>ReadLengthValueAsync</c> applies its own cap first and rejects anything
+    /// negative or over it with a message that names no field, which is why the theory above asserts only
+    /// the exception type.
+    /// </remarks>
+    [Fact]
+    public async Task TheHybridsTwoLengthFieldsAreRejectedByName()
+    {
+        byte[] header = await FormatTestData.BuildHeaderAsync(HeaderShape.Hybrid);
+        int encapsulationLengthOffset =
+            FormatLayout.HybridEncapsulationLengthOffset(FormatTestData.RsaWrappedKeyLength);
+
+        DataEncryptionFormatException wrapped = await Assert.ThrowsAsync<DataEncryptionFormatException>(
+            () => FormatTestData.ReadHeaderAsync(
+                FormatTestData.WithInt32At(header, 18, 0), EncryptionMethod.Hybrid));
+        Assert.Contains("RSA wrapped-key length", wrapped.Message);
+
+        DataEncryptionFormatException encapsulation = await Assert.ThrowsAsync<DataEncryptionFormatException>(
+            () => FormatTestData.ReadHeaderAsync(
+                FormatTestData.WithInt32At(header, encapsulationLengthOffset, 0), EncryptionMethod.Hybrid));
+        Assert.Contains("ML-KEM encapsulation length", encapsulation.Message);
+    }
+
+    /// <summary>
+    /// Both of the hybrid's length fields are accepted right at their caps, and the two caps are the RSA
+    /// and ML-KEM ones rather than anything hybrid-specific.
+    /// </summary>
+    [Fact]
+    public async Task TheHybridsLengthFieldsAreBoundedByTheRsaAndMLKemCaps()
+    {
+        byte[] header = await FormatTestData.BuildHeaderAsync(HeaderShape.Hybrid);
+        int encapsulationLengthOffset =
+            FormatLayout.HybridEncapsulationLengthOffset(FormatTestData.RsaWrappedKeyLength);
+
+        // Tightening the RSA cap alone refuses the container...
+        await Assert.ThrowsAsync<DataEncryptionFormatException>(
+            () => FormatTestData.ReadHeaderAsync(
+                header,
+                EncryptionMethod.Hybrid,
+                new DataEncryptionLimits { MaxWrappedKeyLength = FormatTestData.RsaWrappedKeyLength - 1 }));
+
+        // ...and so does tightening the ML-KEM cap alone.
+        await Assert.ThrowsAsync<DataEncryptionFormatException>(
+            () => FormatTestData.ReadHeaderAsync(
+                header,
+                EncryptionMethod.Hybrid,
+                new DataEncryptionLimits
+                {
+                    MaxEncapsulationLength = FormatTestData.MLKemEncapsulationLength - 1,
+                }));
+
+        // Exactly at both caps is legal — the caps include their own value.
+        ParsedHeader parsed = await FormatTestData.ReadHeaderAsync(
+            header,
+            EncryptionMethod.Hybrid,
+            new DataEncryptionLimits
+            {
+                MaxWrappedKeyLength = FormatTestData.RsaWrappedKeyLength,
+                MaxEncapsulationLength = FormatTestData.MLKemEncapsulationLength,
+            });
+
+        Assert.Equal(FormatTestData.RsaWrappedKeyLength, parsed.Header.WrappedKeyLength);
+        Assert.Equal(FormatTestData.MLKemEncapsulationLength, parsed.Header.EncapsulationLength);
+        Assert.Equal(278, encapsulationLengthOffset);
+    }
+
     /// <summary>
     /// An enormous announced length must be rejected by arithmetic, before anything is allocated for it.
     /// A reader that allocated first would fail with <c>OutOfMemoryException</c> instead — the very
@@ -330,7 +540,7 @@ public sealed class HeaderValidationTests
     public async Task AnEnormousWrappedKeyLengthIsRejectedWithoutAllocating()
     {
         byte[] header = await FormatTestData.BuildHeaderAsync(HeaderShape.Rsa);
-        byte[] patched = FormatTestData.WithInt32At(header, 17, int.MaxValue);
+        byte[] patched = FormatTestData.WithInt32At(header, 18, int.MaxValue);
 
         await Assert.ThrowsAsync<DataEncryptionFormatException>(
             () => FormatTestData.ReadHeaderAsync(patched, EncryptionMethod.Rsa));

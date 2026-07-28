@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Threading.Tasks;
+using Enigma.Core.Asymmetric.PublicKey;
 using Enigma.DataEncryption.Internal;
 using Enigma.DataEncryption.UnitTests.Internal;
 using Xunit;
@@ -30,7 +31,8 @@ public sealed class RsaKeyMaterialClearingTests(RsaKeyFixture keys)
         using MemoryStream output = new();
 
         await RsaTestData.Service(randomSource).EncryptAsync(
-            input, output, Cipher.Aes256Gcm, keys.PublicKeyPem, null, TestContext.Current.CancellationToken);
+            input, output, Cipher.Aes256Gcm, keys.PublicKeyPem, RsaOaepHash.Sha256, null,
+            TestContext.Current.CancellationToken);
 
         AssertIssuedDataKeysWereUsedThenCleared(randomSource);
     }
@@ -45,7 +47,8 @@ public sealed class RsaKeyMaterialClearingTests(RsaKeyFixture keys)
 
         await Assert.ThrowsAnyAsync<ArgumentException>(
             () => RsaTestData.Service(randomSource).EncryptAsync(
-                input, output, Cipher.Aes256Gcm, RsaTestData.NotAPem, null, TestContext.Current.CancellationToken));
+                input, output, Cipher.Aes256Gcm, RsaTestData.NotAPem, RsaOaepHash.Sha256, null,
+                TestContext.Current.CancellationToken));
 
         AssertIssuedDataKeysWereUsedThenCleared(randomSource);
     }

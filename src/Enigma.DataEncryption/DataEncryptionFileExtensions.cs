@@ -3,13 +3,15 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Enigma.Core.Asymmetric.Pqc;
+using Enigma.Core.Asymmetric.PublicKey;
 using Enigma.DataEncryption.Internal;
 
 namespace Enigma.DataEncryption;
 
 /// <summary>
 /// File-path convenience wrappers over the stream-based encryption services: open the two files, run
-/// the operation, and clean up after a failure.
+/// the operation, and clean up after a failure. Fourteen methods — an encrypt/decrypt pair per
+/// credential shape.
 /// </summary>
 /// <remarks>
 /// <para>Every method in this class shares three deliberate, load-bearing semantics.</para>
@@ -366,11 +368,13 @@ public static class DataEncryptionFileExtensions
     /// <param name="outputPath">Path of the container file to write. <b>Overwritten if it exists</b>; deleted if the operation fails.</param>
     /// <param name="cipher">The AEAD block cipher to protect the payload with.</param>
     /// <param name="publicKeyPem">The recipient's RSA public key, PEM-encoded.</param>
+    /// <param name="oaepHash">The hash backing the OAEP padding, recorded in the header. SHA-256 (the default), SHA-384 and SHA-512 are accepted; SHA-1 is rejected. Validated <b>before either file is opened</b>.</param>
     /// <param name="progress">Optional progress receiver, reporting <b>payload bytes processed</b>.</param>
     /// <param name="cancellationToken">Optional token to cancel the operation.</param>
     /// <returns>A task representing the asynchronous encryption.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="service"/>, <paramref name="inputPath"/>, <paramref name="outputPath"/> or <paramref name="publicKeyPem"/> is <see langword="null"/>.</exception>
-    /// <exception cref="ArgumentException">A path is empty, or <paramref name="publicKeyPem"/> is empty or not a readable RSA public-key PEM, or <paramref name="cipher"/> is not a defined value.</exception>
+    /// <exception cref="ArgumentException">A path is empty, or <paramref name="publicKeyPem"/> is empty, not a readable RSA public-key PEM, or too small to wrap a 32-byte data key under <paramref name="oaepHash"/>; or <paramref name="cipher"/> is not a defined value.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="oaepHash"/> is SHA-1, which this format does not accept, or is not a defined value.</exception>
     /// <exception cref="IOException">A file could not be opened, read or written.</exception>
     /// <exception cref="OperationCanceledException">The operation was cancelled; the partial output file has been deleted.</exception>
     public static Task EncryptFileAsync(
@@ -379,18 +383,20 @@ public static class DataEncryptionFileExtensions
         string outputPath,
         Cipher cipher,
         string publicKeyPem,
+        RsaOaepHash oaepHash = RsaOaepHash.Sha256,
         IProgress<int>? progress = null,
         CancellationToken cancellationToken = default)
     {
         ValidateTarget(service, inputPath, outputPath);
         CipherResolver.ValidateArgument(cipher, nameof(cipher));
         ValidatePem(publicKeyPem, nameof(publicKeyPem));
+        RsaOaepHashWire.ValidateArgument(oaepHash, nameof(oaepHash));
 
         return RunAsync(
             inputPath,
             outputPath,
             (input, output) => service.EncryptAsync(
-                input, output, cipher, publicKeyPem, progress, cancellationToken));
+                input, output, cipher, publicKeyPem, oaepHash, progress, cancellationToken));
     }
 
     /// <summary>Decrypts the RSA container at <paramref name="inputPath"/> to <paramref name="outputPath"/>.</summary>
@@ -406,7 +412,7 @@ public static class DataEncryptionFileExtensions
     /// <exception cref="ArgumentNullException"><paramref name="service"/>, <paramref name="inputPath"/>, <paramref name="outputPath"/> or <paramref name="privateKeyPem"/> is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException">A path is empty, or <paramref name="privateKeyPem"/> is empty or not a readable RSA private-key PEM.</exception>
     /// <exception cref="IOException">A file could not be opened, read or written.</exception>
-    /// <exception cref="DataEncryptionFormatException">The file is not a valid RSA container, or the wrapped-key length is out of bounds.</exception>
+    /// <exception cref="DataEncryptionFormatException">The file is not a valid RSA container, its OAEP-hash byte is undefined or the reserved SHA-1 value, or the wrapped-key length is out of bounds.</exception>
     /// <exception cref="DataDecryptionException">The private key does not match the container, or the payload fails authentication.</exception>
     /// <exception cref="OperationCanceledException">The operation was cancelled; the partial output file has been deleted.</exception>
     public static Task DecryptFileAsync(
@@ -502,6 +508,92 @@ public static class DataEncryptionFileExtensions
             outputPath,
             (input, output) => service.DecryptAsync(
                 input, output, privateKey, limits, progress, cancellationToken));
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Hybrid RSA + ML-KEM
+    // ---------------------------------------------------------------------------------------------
+
+    /// <summary>Encrypts <paramref name="inputPath"/> to <paramref name="outputPath"/> for the holder of <b>both</b> private keys matching <paramref name="rsaPublicKeyPem"/> and <paramref name="mlKemPublicKey"/>.</summary>
+    /// <param name="service">The hybrid service performing the operation.</param>
+    /// <param name="inputPath">Path of the plaintext file to read.</param>
+    /// <param name="outputPath">Path of the container file to write. <b>Overwritten if it exists</b>; deleted if the operation fails.</param>
+    /// <param name="cipher">The AEAD block cipher to protect the payload with.</param>
+    /// <param name="rsaPublicKeyPem">The recipient's RSA public key, PEM-encoded.</param>
+    /// <param name="mlKemPublicKey">The recipient's ML-KEM public key, in its raw FIPS 203 encoding.</param>
+    /// <param name="parameterSet">The ML-KEM parameter set to encapsulate under, written into the header. Defaults to <see cref="MLKemParameterSet.MLKem1024"/>.</param>
+    /// <param name="progress">Optional progress receiver, reporting <b>payload bytes processed</b>.</param>
+    /// <param name="cancellationToken">Optional token to cancel the operation.</param>
+    /// <returns>A task representing the asynchronous encryption.</returns>
+    /// <remarks>Both credentials are required — see <see cref="IHybridDataEncryptionService"/>.</remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="service"/>, <paramref name="inputPath"/>, <paramref name="outputPath"/>, <paramref name="rsaPublicKeyPem"/> or <paramref name="mlKemPublicKey"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">A path is empty, or a key is empty or unusable, or <paramref name="cipher"/> / <paramref name="parameterSet"/> is not a defined value.</exception>
+    /// <exception cref="IOException">A file could not be opened, read or written.</exception>
+    /// <exception cref="OperationCanceledException">The operation was cancelled; the partial output file has been deleted.</exception>
+    public static Task EncryptFileAsync(
+        this IHybridDataEncryptionService service,
+        string inputPath,
+        string outputPath,
+        Cipher cipher,
+        string rsaPublicKeyPem,
+        byte[] mlKemPublicKey,
+        MLKemParameterSet parameterSet = MLKemParameterSet.MLKem1024,
+        IProgress<int>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateTarget(service, inputPath, outputPath);
+        CipherResolver.ValidateArgument(cipher, nameof(cipher));
+        ValidatePem(rsaPublicKeyPem, nameof(rsaPublicKeyPem));
+        ValidateKemKey(mlKemPublicKey, nameof(mlKemPublicKey));
+        MLKemParameterSetWire.ValidateArgument(parameterSet, nameof(parameterSet));
+
+        return RunAsync(
+            inputPath,
+            outputPath,
+            (input, output) => service.EncryptAsync(
+                input, output, cipher, rsaPublicKeyPem, mlKemPublicKey, parameterSet, progress,
+                cancellationToken));
+    }
+
+    /// <summary>Decrypts the hybrid container at <paramref name="inputPath"/> to <paramref name="outputPath"/>, using <b>both</b> private keys.</summary>
+    /// <param name="service">The hybrid service performing the operation.</param>
+    /// <param name="inputPath">Path of the container file to read.</param>
+    /// <param name="outputPath">Path of the plaintext file to write. <b>Overwritten if it exists</b>; deleted if the operation fails, so a wrong key leaves no truncated plaintext behind.</param>
+    /// <param name="rsaPrivateKeyPem">The recipient's RSA private key, PEM-encoded; may be an encrypted private-key PEM.</param>
+    /// <param name="mlKemPrivateKey">The recipient's ML-KEM private key, in its raw expanded FIPS 203 encoding. Never cleared by this method.</param>
+    /// <param name="rsaKeyPassword">The passphrase protecting an encrypted <paramref name="rsaPrivateKeyPem"/>, or <see langword="null"/>. Never cleared by this method.</param>
+    /// <param name="limits">Header bounds applied before either variable-length field is allocated or read. Pass <see langword="null"/> to use <see cref="DataEncryptionLimits.Default"/>.</param>
+    /// <param name="progress">Optional progress receiver, reporting <b>payload bytes processed</b>.</param>
+    /// <param name="cancellationToken">Optional token to cancel the operation.</param>
+    /// <returns>A task representing the asynchronous decryption.</returns>
+    /// <remarks>The parameter set is read from the container's header, so it is not a parameter here.</remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="service"/>, <paramref name="inputPath"/>, <paramref name="outputPath"/>, <paramref name="rsaPrivateKeyPem"/> or <paramref name="mlKemPrivateKey"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">A path is empty, or a key is empty or unparseable.</exception>
+    /// <exception cref="IOException">A file could not be opened, read or written.</exception>
+    /// <exception cref="DataEncryptionFormatException">The file is not a valid hybrid container, its parameter-set byte is undefined, or a length field is out of bounds.</exception>
+    /// <exception cref="DataDecryptionException">Either private key does not match the container, or the payload fails authentication.</exception>
+    /// <exception cref="OperationCanceledException">The operation was cancelled; the partial output file has been deleted.</exception>
+    public static Task DecryptFileAsync(
+        this IHybridDataEncryptionService service,
+        string inputPath,
+        string outputPath,
+        string rsaPrivateKeyPem,
+        byte[] mlKemPrivateKey,
+        char[]? rsaKeyPassword = null,
+        DataEncryptionLimits? limits = null,
+        IProgress<int>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateTarget(service, inputPath, outputPath);
+        ValidatePem(rsaPrivateKeyPem, nameof(rsaPrivateKeyPem));
+        ValidateKemKey(mlKemPrivateKey, nameof(mlKemPrivateKey));
+
+        return RunAsync(
+            inputPath,
+            outputPath,
+            (input, output) => service.DecryptAsync(
+                input, output, rsaPrivateKeyPem, mlKemPrivateKey, rsaKeyPassword, limits, progress,
+                cancellationToken));
     }
 
     // ---------------------------------------------------------------------------------------------

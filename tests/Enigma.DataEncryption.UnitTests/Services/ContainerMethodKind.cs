@@ -1,7 +1,7 @@
 namespace Enigma.DataEncryption.UnitTests.Services;
 
 /// <summary>
-/// The four encryption methods, as a theory parameter for the cross-cutting suites that must hold for
+/// The five encryption methods, as a theory parameter for the cross-cutting suites that must hold for
 /// all of them.
 /// </summary>
 /// <remarks>
@@ -24,4 +24,7 @@ public enum ContainerMethodKind
     /// <summary>Method <c>0x04</c> — <see cref="IMLKemDataEncryptionService"/>.</summary>
     // ReSharper disable once InconsistentNaming
     MLKem,
+
+    /// <summary>Method <c>0x05</c> — <see cref="IHybridDataEncryptionService"/>. The only two-credential method.</summary>
+    Hybrid,
 }

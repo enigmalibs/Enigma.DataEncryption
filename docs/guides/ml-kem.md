@@ -359,6 +359,11 @@ methods in [File operations](file-operations.md), which delete the partial outpu
 - **This is post-quantum key establishment, not a post-quantum signature.** Anyone with the recipient's
   public key can produce a valid container, so a successful decrypt proves the container was made for you
   — not who made it.
+- **This method is not hybrid.** It wraps the data key under ML-KEM alone, so a container is only as strong
+  as ML-KEM: a classical cryptanalytic break of the lattice problem would open it. If the data must survive
+  that possibility as well as a quantum computer, use
+  [`IHybridDataEncryptionService`](hybrid.md) instead, which combines an ML-KEM secret with an
+  RSA-transported one so that breaking one primitive is not enough.
 - **The shared secret is used as the data key with no additional derivation.** That is a deliberate,
   documented choice, sound because FIPS 203 secrets are uniformly random 32-byte values and the complete
   header is authenticated as associated data.

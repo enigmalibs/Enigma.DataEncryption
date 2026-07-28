@@ -4,15 +4,22 @@ using Xunit;
 namespace Enigma.DataEncryption.UnitTests.Services;
 
 /// <summary>
-/// Generate-once RSA key material shared by every RSA suite: three key sizes, an unrelated pair, and a
+/// Generate-once RSA key material shared by every RSA suite: five key sizes, an unrelated pair, and a
 /// passphrase-protected private-key PEM.
 /// </summary>
 /// <remarks>
 /// <para>
-/// RSA key generation is the expensive part of these tests — roughly two seconds for all five pairs, and
+/// RSA key generation is the expensive part of these tests — roughly two seconds for all seven pairs, and
 /// far more than that if each test class generated its own. Enigma.Core's own <c>RsaKeyFixture</c> solves
 /// this with a collection fixture; this is the same pattern, widened to the sizes and the wrong-key
 /// material this phase needs.
+/// </para>
+/// <para>
+/// <b>The two deliberately weak pairs are generated, never committed.</b> A 1024-bit and a 512-bit RSA key
+/// are what make the OAEP key-size interaction testable (<c>docs/format.md</c> §3.3: a 32-byte data key
+/// needs a modulus of <c>2·hLen + 34</c> bytes), and committing PEMs that weak into the repository would
+/// leave usable-looking weak keys lying in a fixtures folder. They cost little: small moduli are the fast
+/// ones to generate.
 /// </para>
 /// <para>
 /// The generated pairs are <b>not</b> the committed golden-vector key — that one is a fixture file, so the
@@ -34,6 +41,12 @@ public sealed class RsaKeyFixture
         (PublicKeyPem3072, PrivateKeyPem3072) = service.GenerateRsaKeyPair(3072);
         (PublicKeyPem4096, PrivateKeyPem4096) = service.GenerateRsaKeyPair(4096);
         (UnrelatedPublicKeyPem, UnrelatedPrivateKeyPem) = service.GenerateRsaKeyPair(2048);
+
+        // Too small for OAEP-SHA-384 (needs 130 bytes) and OAEP-SHA-512 (162), fine under SHA-256 (98).
+        (PublicKeyPem1024, PrivateKeyPem1024) = service.GenerateRsaKeyPair(1024);
+
+        // Too small for every accepted hash, including the default — the gap that predates this feature.
+        (PublicKeyPem512, PrivateKeyPem512) = service.GenerateRsaKeyPair(512);
 
         // An encrypted private-key PEM in BouncyCastle's traditional OpenSSL envelope
         // (RSA PRIVATE KEY + Proc-Type: 4,ENCRYPTED). The committed fixture is a PKCS#8
@@ -59,6 +72,23 @@ public sealed class RsaKeyFixture
 
     /// <summary>The matching unencrypted 4096-bit private key, PEM-encoded.</summary>
     public string PrivateKeyPem4096 { get; }
+
+    /// <summary>
+    /// A <b>1024-bit</b> RSA public key: usable under OAEP-SHA-256, too small for SHA-384 and SHA-512.
+    /// </summary>
+    public string PublicKeyPem1024 { get; }
+
+    /// <summary>The matching unencrypted 1024-bit private key, PEM-encoded.</summary>
+    public string PrivateKeyPem1024 { get; }
+
+    /// <summary>
+    /// A <b>512-bit</b> RSA public key: too small for every accepted hash, the default included. It exists
+    /// to pin the pre-existing wrap-failure gap, never to encrypt anything successfully.
+    /// </summary>
+    public string PublicKeyPem512 { get; }
+
+    /// <summary>The matching unencrypted 512-bit private key, PEM-encoded.</summary>
+    public string PrivateKeyPem512 { get; }
 
     /// <summary>A second, unrelated 2048-bit public key — the wrong key, in the tests that need one.</summary>
     public string UnrelatedPublicKeyPem { get; }

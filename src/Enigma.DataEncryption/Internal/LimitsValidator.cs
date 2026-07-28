@@ -43,7 +43,7 @@ internal static class LimitsValidator
     }
 
     /// <summary>Validates the wrapped-key length of a method-<c>0x03</c> header.</summary>
-    /// <param name="wrappedKeyLength">The value read from header offset 17.</param>
+    /// <param name="wrappedKeyLength">The value read from header offset 18.</param>
     /// <param name="limits">The bounds to apply.</param>
     /// <exception cref="DataEncryptionFormatException">The value is <c>&lt;= 0</c> or above its cap.</exception>
     internal static void ValidateWrappedKeyLength(int wrappedKeyLength, DataEncryptionLimits limits) =>
