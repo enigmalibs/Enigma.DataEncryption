@@ -198,6 +198,37 @@ public sealed class LimitsValidatorTests
         LimitsValidator.ValidatePbkdf2Iterations(101, DataEncryptionLimits.Default);
     }
 
+    /// <summary>
+    /// Each of the three Argon2 caps is tightenable on its own, and each is applied independently. Argon2
+    /// is the method where that matters: a caller who can afford 64 MiB but not 64 passes needs to say so
+    /// without also lowering the memory bound.
+    /// </summary>
+    [Fact]
+    public void EachArgon2CapCanBeTightenedIndependently()
+    {
+        DataEncryptionLimits fewerPasses = new() { MaxArgon2Iterations = 2 };
+        LimitsValidator.ValidateArgon2(2, 4, 65_536, fewerPasses);
+        Assert.Throws<DataEncryptionFormatException>(
+            () => LimitsValidator.ValidateArgon2(3, 4, 65_536, fewerPasses));
+
+        DataEncryptionLimits fewerLanes = new() { MaxArgon2DegreeOfParallelism = 2 };
+        LimitsValidator.ValidateArgon2(3, 2, 65_536, fewerLanes);
+        Assert.Throws<DataEncryptionFormatException>(
+            () => LimitsValidator.ValidateArgon2(3, 3, 65_536, fewerLanes));
+
+        DataEncryptionLimits lessMemory = new() { MaxArgon2MemorySizeKb = 1_024 };
+        LimitsValidator.ValidateArgon2(3, 4, 1_024, lessMemory);
+        Assert.Throws<DataEncryptionFormatException>(
+            () => LimitsValidator.ValidateArgon2(3, 4, 1_025, lessMemory));
+
+        // Tightening one cap leaves the other two at their defaults, so the default costs still pass.
+        LimitsValidator.ValidateArgon2(
+            DataEncryptionDefaults.Argon2Iterations,
+            DataEncryptionDefaults.Argon2DegreeOfParallelism,
+            DataEncryptionDefaults.Argon2MemorySizeKb,
+            new DataEncryptionLimits { MaxArgon2Iterations = 3 });
+    }
+
     /// <summary>The message must name the field and the cap, or a caller cannot act on it.</summary>
     [Fact]
     public void TheMessage_NamesTheFieldAndTheCap()

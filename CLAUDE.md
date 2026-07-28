@@ -4,34 +4,43 @@ Guidance for Claude Code (and other AI agents) working in this repository.
 
 ## Current state
 
-**The shape is settled; all four encryption methods work, and the surrounding plumbing is what remains.**
-`FEATURE-67FD` stood up the git repo, the
-root configuration, the multi-targeted library and an MTP-native xUnit v3 test project. `FEATURE-00E7`
-then added the normative format spec (`docs/format.md`) and the **complete public API surface** — enums,
-constants, limits, the header record, the exception hierarchy, five service interfaces with their
-implementations, the file-path extensions, the DI registration and the internal `IRandomSource` seam —
-all fully XML-documented.
+**The library is functionally complete; what remains is the release.** `FEATURE-67FD` stood up the git
+repo, the root configuration, the multi-targeted library and an MTP-native xUnit v3 test project.
+`FEATURE-00E7` then added the normative format spec (`docs/format.md`) and the **complete public API
+surface** — enums, constants, limits, the header record, the exception hierarchy, five service interfaces
+with their implementations, the file-path extensions, the DI registration and the internal `IRandomSource`
+seam — all fully XML-documented.
 
-`FEATURE-11B6` fills in the behaviour across five phases **without changing a single signature** — if
-you find yourself needing to, stop and reconcile the plan first. **`PHASE01` is done:** the internal
-format machinery under `Internal/` is real and tested — the header writer and reader (the reader tees
-the bytes it consumes, so the GCM associated data is definitionally what was on the wire), key
-confirmation, limit validation, cipher resolution, and the constant-time/clearing helpers.
-**`PHASE02` is done:** the two password-based services work end to end, pinned by golden vectors
-computed outside this library (Python's `hashlib`/`hmac`, OpenSSL's `ARGON2ID`, the platform's
-`AesGcm`), with the payload stage and the credential handling factored into `Internal/PayloadCipher.cs`
-and `Internal/PasswordCredential.cs` for the phases that follow. **`PHASE03` is done:** the RSA service
-transports its data key under RSAES-OAEP-SHA256, with golden vectors that pin every byte OAEP's own
-randomness allows (the wrapped key is the exception, and the suite says so) and committed PEM fixtures for
-the read path. **`PHASE04` is done:** the ML-KEM service takes the encapsulated shared secret directly as its
-data key — the one method that draws no key material of its own — and the key-confirmation tag finally earns
-its keep, since FIPS 203 implicit rejection makes decapsulation with a wrong key *succeed*; the suite proves
-that against Enigma.Core first, then proves the tag rejects it before a payload byte is read.
-**`PHASE05` (next)** fills in the inspector, the file-path extensions and the cross-cutting robustness suites.
+`FEATURE-11B6` filled in the behaviour across five phases **without changing a single signature**, and is
+**done**. If you find yourself needing to change one now, stop and reconcile the spec first.
 
-**One service body still throws `NotImplementedException`** — the inspector — as do the twelve file-path
-extension methods. All four encryption services are real, and so are `AddEnigmaDataEncryption()` and
-`RandomSource` (both since `FEATURE-00E7`).
+- **`PHASE01`** — the internal format machinery under `Internal/`: the header writer and reader (the reader
+  tees the bytes it consumes, so the GCM associated data is definitionally what was on the wire), key
+  confirmation, limit validation, cipher resolution, and the constant-time/clearing helpers.
+- **`PHASE02`** — the two password-based services, pinned by golden vectors computed outside this library
+  (Python's `hashlib`/`hmac`, OpenSSL's `ARGON2ID`, the platform's `AesGcm`), with the payload stage and the
+  credential handling factored into `Internal/PayloadCipher.cs` and `Internal/PasswordCredential.cs`.
+- **`PHASE03`** — the RSA service, transporting its data key under RSAES-OAEP-SHA256, with golden vectors
+  that pin every byte OAEP's own randomness allows (the wrapped key is the exception, and the suite says so)
+  and committed PEM fixtures for the read path.
+- **`PHASE04`** — the ML-KEM service, taking the encapsulated shared secret directly as its data key (the one
+  method that draws no key material of its own). Here the key-confirmation tag earns its keep: FIPS 203
+  implicit rejection makes decapsulation with a wrong key *succeed*, and the suite proves that against
+  Enigma.Core first, then proves the tag rejects it before a payload byte is read.
+- **`PHASE05`** — the inspector, the twelve file-path extensions, and the cross-cutting suites that needed
+  all four methods present: a generated malformed-input sweep (~2,600 corrupted containers per TFM, asserting
+  the exception is always one of the two container types and never an indexing, allocation or unwrapped
+  Enigma.Core failure), thread-safety for all five singletons, DI round-trips through resolved services, and
+  an executable inventory of every committed fixture.
+
+**Nothing in the library throws `NotImplementedException` any more.** All five services, the file-path
+extensions, `AddEnigmaDataEncryption()` and `RandomSource` are real. The suite is ~16,150 tests over both
+test TFMs, with the library at ~97% line / ~91% branch coverage.
+
+Two behaviours worth knowing before you touch the file-path extensions: **arguments are validated before
+either file is opened** (the output is `FileMode.Create`, so validating later would truncate a caller's
+existing file only to delete it again), and **the output handle is closed before the cleanup delete runs**
+(deleting a file the process still holds open fails on Windows). Both are asserted; neither is incidental.
 
 One thing PHASE03 settled that matters beyond it: **Enigma.Core reports a wrong RSA private key and an
 undecryptable private-key PEM identically**, so `docs/format.md` §9 now wraps both as
@@ -215,6 +224,6 @@ plan's acceptance criteria are met, the roadmap/plan statuses are updated, and t
 written. Commits are left to the maintainer.
 
 The sequence is a hard dependency chain: `FEATURE-67FD` (done) → `FEATURE-00E7` (done — format spec +
-API skeleton) → **`FEATURE-11B6` (in progress: PHASE01–PHASE04 done, PHASE05 next)** → `FEATURE-07DA` (v1.0.0 release,
-4 phases). `FEATURE-136E` (legacy decrypt) and `FEATURE-5A30` (hybrid method) are deferred by design
+API skeleton) → `FEATURE-11B6` (done — all five phases) → **`FEATURE-07DA` (next: v1.0.0 release, 4
+phases)**. `FEATURE-136E` (legacy decrypt) and `FEATURE-5A30` (hybrid method) are deferred by design
 and are not part of v1.0.0. `docs/roadmap.md` is authoritative for current status.

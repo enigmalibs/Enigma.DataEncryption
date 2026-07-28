@@ -9,12 +9,12 @@ Status vocabulary: `TODO`, `IN PROGRESS`, `DONE`, `ABANDONED`.
 |--------------|------------------------------------------------------------|--------|---------------------------|
 | FEATURE-67FD | Repository & solution bootstrap                            | DONE   | docs/plan/FEATURE-67FD.md |
 | FEATURE-00E7 | Binary format spec & public abstraction skeleton           | DONE   | docs/plan/FEATURE-00E7.md |
-| FEATURE-11B6 | Core implementation                                        | IN PROGRESS | docs/plan/FEATURE-11B6.md |
+| FEATURE-11B6 | Core implementation                                        | DONE   | docs/plan/FEATURE-11B6.md |
 | - PHASE01    | Shared format infrastructure                               | DONE   | (in FEATURE-11B6.md)      |
 | - PHASE02    | Password-based services (PBKDF2 + Argon2)                  | DONE   | (in FEATURE-11B6.md)      |
 | - PHASE03    | RSA service                                                | DONE   | (in FEATURE-11B6.md)      |
 | - PHASE04    | ML-KEM service                                             | DONE   | (in FEATURE-11B6.md)      |
-| - PHASE05    | Inspector, file extensions, DI & robustness suites          | TODO   | (in FEATURE-11B6.md)      |
+| - PHASE05    | Inspector, file extensions, DI & robustness suites          | DONE   | (in FEATURE-11B6.md)      |
 | FEATURE-07DA | NuGet release preparation (v1.0.0)                         | TODO   | docs/plan/FEATURE-07DA.md |
 | - PHASE01    | Package metadata & build config + license audit            | TODO   | (in FEATURE-07DA.md)      |
 | - PHASE02    | Per-category guides & index                                | TODO   | (in FEATURE-07DA.md)      |

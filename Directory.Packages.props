@@ -11,13 +11,17 @@
     <PackageVersion Include="System.Buffers" Version="4.6.1" />
     <PackageVersion Include="PolySharp" Version="1.16.0" />
   </ItemGroup>
-  <!-- Tests (MTP-native: xunit.v3 only; coverlet.collector for coverage). No Microsoft.NET.Test.Sdk.
+  <!-- Tests (MTP-native: xunit.v3 only). No Microsoft.NET.Test.Sdk.
+       Microsoft.Testing.Extensions.CodeCoverage is what supplies the coverage option under the Microsoft
+       Testing Platform; coverlet.collector is a VSTest data collector and registers nothing with an MTP
+       runner, so it is kept only for a VSTest-based IDE runner and is not what produces the figure.
        Microsoft.Extensions.DependencyInjection is the concrete container, needed only to build a real
        ServiceProvider in the DI tests — the library itself depends on the Abstractions alone, and this
        reference must never migrate into it. Version-matched to the Abstractions pin above. -->
   <ItemGroup>
     <PackageVersion Include="xunit.v3" Version="3.2.2" />
     <PackageVersion Include="coverlet.collector" Version="6.0.4" />
+    <PackageVersion Include="Microsoft.Testing.Extensions.CodeCoverage" Version="18.0.4" />
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="9.0.18" />
   </ItemGroup>
 </Project>

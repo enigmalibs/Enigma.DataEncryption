@@ -1,6 +1,6 @@
 # FEATURE-11B6 — Core implementation
 
-**Status:** IN PROGRESS
+**Status:** DONE
 **Type:** FEATURE (5 phases)
 **Depends on:** FEATURE-00E7
 
@@ -331,7 +331,7 @@ Notes:
 
 ## PHASE05 — Inspector, file extensions, DI & robustness suites
 
-**Status:** TODO
+**Status:** DONE
 
 ### Scope
 

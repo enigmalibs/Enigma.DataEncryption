@@ -3,6 +3,7 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Enigma.Core.Asymmetric.Pqc;
+using Enigma.DataEncryption.Internal;
 
 namespace Enigma.DataEncryption;
 
@@ -30,6 +31,12 @@ namespace Enigma.DataEncryption;
 ///   </description></item>
 /// </list>
 /// <para>
+/// <b>Arguments are validated before either file is opened.</b> Since the output is opened
+/// <c>FileMode.Create</c>, validating afterwards would truncate an existing file only to delete it
+/// again — so a bad argument leaves the filesystem untouched, and the create-then-delete cycle is
+/// reserved for failures that genuinely required the attempt.
+/// </para>
+/// <para>
 /// These are extension methods on the service interfaces rather than members of the implementations,
 /// so they compose with any implementation — including a test double.
 /// </para>
@@ -42,6 +49,11 @@ namespace Enigma.DataEncryption;
 /// </remarks>
 public static class DataEncryptionFileExtensions
 {
+    /// <summary>
+    /// The <see cref="FileStream"/> buffer size both files are opened with, in bytes.
+    /// </summary>
+    private const int FileBufferSize = 4096;
+
     // ---------------------------------------------------------------------------------------------
     // PBKDF2
     // ---------------------------------------------------------------------------------------------
@@ -58,6 +70,7 @@ public static class DataEncryptionFileExtensions
     /// <returns>A task representing the asynchronous encryption.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="service"/>, <paramref name="inputPath"/>, <paramref name="outputPath"/> or <paramref name="password"/> is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException">A path is empty, or <paramref name="password"/> is empty, or <paramref name="cipher"/> is not a defined value.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="iterations"/> is not greater than zero.</exception>
     /// <exception cref="IOException">A file could not be opened, read or written.</exception>
     /// <exception cref="OperationCanceledException">The operation was cancelled; the partial output file has been deleted.</exception>
     public static Task EncryptFileAsync(
@@ -68,8 +81,19 @@ public static class DataEncryptionFileExtensions
         byte[] password,
         int iterations = DataEncryptionDefaults.Pbkdf2Iterations,
         IProgress<int>? progress = null,
-        CancellationToken cancellationToken = default) =>
-        throw new NotImplementedException();
+        CancellationToken cancellationToken = default)
+    {
+        ValidateTarget(service, inputPath, outputPath);
+        CipherResolver.ValidateArgument(cipher, nameof(cipher));
+        PasswordCredential.Validate(password, nameof(password));
+        RequirePositive(iterations, nameof(iterations), "The PBKDF2 iteration count");
+
+        return RunAsync(
+            inputPath,
+            outputPath,
+            (input, output) => service.EncryptAsync(
+                input, output, cipher, password, iterations, progress, cancellationToken));
+    }
 
     /// <summary>Encrypts <paramref name="inputPath"/> to <paramref name="outputPath"/> with PBKDF2, using a password supplied as characters.</summary>
     /// <param name="service">The PBKDF2 service performing the operation.</param>
@@ -83,6 +107,7 @@ public static class DataEncryptionFileExtensions
     /// <returns>A task representing the asynchronous encryption.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="service"/>, <paramref name="inputPath"/>, <paramref name="outputPath"/> or <paramref name="password"/> is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException">A path is empty, or <paramref name="password"/> is empty, or <paramref name="cipher"/> is not a defined value.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="iterations"/> is not greater than zero.</exception>
     /// <exception cref="IOException">A file could not be opened, read or written.</exception>
     /// <exception cref="OperationCanceledException">The operation was cancelled; the partial output file has been deleted.</exception>
     public static Task EncryptFileAsync(
@@ -93,8 +118,19 @@ public static class DataEncryptionFileExtensions
         char[] password,
         int iterations = DataEncryptionDefaults.Pbkdf2Iterations,
         IProgress<int>? progress = null,
-        CancellationToken cancellationToken = default) =>
-        throw new NotImplementedException();
+        CancellationToken cancellationToken = default)
+    {
+        ValidateTarget(service, inputPath, outputPath);
+        CipherResolver.ValidateArgument(cipher, nameof(cipher));
+        PasswordCredential.Validate(password, nameof(password));
+        RequirePositive(iterations, nameof(iterations), "The PBKDF2 iteration count");
+
+        return RunAsync(
+            inputPath,
+            outputPath,
+            (input, output) => service.EncryptAsync(
+                input, output, cipher, password, iterations, progress, cancellationToken));
+    }
 
     /// <summary>Decrypts the PBKDF2 container at <paramref name="inputPath"/> to <paramref name="outputPath"/>, using a password supplied as raw bytes.</summary>
     /// <param name="service">The PBKDF2 service performing the operation.</param>
@@ -118,8 +154,17 @@ public static class DataEncryptionFileExtensions
         byte[] password,
         DataEncryptionLimits? limits = null,
         IProgress<int>? progress = null,
-        CancellationToken cancellationToken = default) =>
-        throw new NotImplementedException();
+        CancellationToken cancellationToken = default)
+    {
+        ValidateTarget(service, inputPath, outputPath);
+        PasswordCredential.Validate(password, nameof(password));
+
+        return RunAsync(
+            inputPath,
+            outputPath,
+            (input, output) => service.DecryptAsync(
+                input, output, password, limits, progress, cancellationToken));
+    }
 
     /// <summary>Decrypts the PBKDF2 container at <paramref name="inputPath"/> to <paramref name="outputPath"/>, using a password supplied as characters.</summary>
     /// <param name="service">The PBKDF2 service performing the operation.</param>
@@ -143,8 +188,17 @@ public static class DataEncryptionFileExtensions
         char[] password,
         DataEncryptionLimits? limits = null,
         IProgress<int>? progress = null,
-        CancellationToken cancellationToken = default) =>
-        throw new NotImplementedException();
+        CancellationToken cancellationToken = default)
+    {
+        ValidateTarget(service, inputPath, outputPath);
+        PasswordCredential.Validate(password, nameof(password));
+
+        return RunAsync(
+            inputPath,
+            outputPath,
+            (input, output) => service.DecryptAsync(
+                input, output, password, limits, progress, cancellationToken));
+    }
 
     // ---------------------------------------------------------------------------------------------
     // Argon2
@@ -164,6 +218,7 @@ public static class DataEncryptionFileExtensions
     /// <returns>A task representing the asynchronous encryption.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="service"/>, <paramref name="inputPath"/>, <paramref name="outputPath"/> or <paramref name="password"/> is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException">A path is empty, or <paramref name="password"/> is empty, or <paramref name="cipher"/> is not a defined value.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="iterations"/>, <paramref name="memorySizeKb"/> or <paramref name="degreeOfParallelism"/> is not greater than zero.</exception>
     /// <exception cref="IOException">A file could not be opened, read or written.</exception>
     /// <exception cref="OperationCanceledException">The operation was cancelled; the partial output file has been deleted.</exception>
     public static Task EncryptFileAsync(
@@ -176,8 +231,20 @@ public static class DataEncryptionFileExtensions
         int memorySizeKb = DataEncryptionDefaults.Argon2MemorySizeKb,
         int degreeOfParallelism = DataEncryptionDefaults.Argon2DegreeOfParallelism,
         IProgress<int>? progress = null,
-        CancellationToken cancellationToken = default) =>
-        throw new NotImplementedException();
+        CancellationToken cancellationToken = default)
+    {
+        ValidateTarget(service, inputPath, outputPath);
+        CipherResolver.ValidateArgument(cipher, nameof(cipher));
+        PasswordCredential.Validate(password, nameof(password));
+        ValidateArgon2Costs(iterations, memorySizeKb, degreeOfParallelism);
+
+        return RunAsync(
+            inputPath,
+            outputPath,
+            (input, output) => service.EncryptAsync(
+                input, output, cipher, password, iterations, memorySizeKb, degreeOfParallelism,
+                progress, cancellationToken));
+    }
 
     /// <summary>Encrypts <paramref name="inputPath"/> to <paramref name="outputPath"/> with Argon2id, using a password supplied as characters.</summary>
     /// <param name="service">The Argon2 service performing the operation.</param>
@@ -193,6 +260,7 @@ public static class DataEncryptionFileExtensions
     /// <returns>A task representing the asynchronous encryption.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="service"/>, <paramref name="inputPath"/>, <paramref name="outputPath"/> or <paramref name="password"/> is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException">A path is empty, or <paramref name="password"/> is empty, or <paramref name="cipher"/> is not a defined value.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="iterations"/>, <paramref name="memorySizeKb"/> or <paramref name="degreeOfParallelism"/> is not greater than zero.</exception>
     /// <exception cref="IOException">A file could not be opened, read or written.</exception>
     /// <exception cref="OperationCanceledException">The operation was cancelled; the partial output file has been deleted.</exception>
     public static Task EncryptFileAsync(
@@ -205,8 +273,20 @@ public static class DataEncryptionFileExtensions
         int memorySizeKb = DataEncryptionDefaults.Argon2MemorySizeKb,
         int degreeOfParallelism = DataEncryptionDefaults.Argon2DegreeOfParallelism,
         IProgress<int>? progress = null,
-        CancellationToken cancellationToken = default) =>
-        throw new NotImplementedException();
+        CancellationToken cancellationToken = default)
+    {
+        ValidateTarget(service, inputPath, outputPath);
+        CipherResolver.ValidateArgument(cipher, nameof(cipher));
+        PasswordCredential.Validate(password, nameof(password));
+        ValidateArgon2Costs(iterations, memorySizeKb, degreeOfParallelism);
+
+        return RunAsync(
+            inputPath,
+            outputPath,
+            (input, output) => service.EncryptAsync(
+                input, output, cipher, password, iterations, memorySizeKb, degreeOfParallelism,
+                progress, cancellationToken));
+    }
 
     /// <summary>Decrypts the Argon2 container at <paramref name="inputPath"/> to <paramref name="outputPath"/>, using a password supplied as raw bytes.</summary>
     /// <param name="service">The Argon2 service performing the operation.</param>
@@ -230,8 +310,17 @@ public static class DataEncryptionFileExtensions
         byte[] password,
         DataEncryptionLimits? limits = null,
         IProgress<int>? progress = null,
-        CancellationToken cancellationToken = default) =>
-        throw new NotImplementedException();
+        CancellationToken cancellationToken = default)
+    {
+        ValidateTarget(service, inputPath, outputPath);
+        PasswordCredential.Validate(password, nameof(password));
+
+        return RunAsync(
+            inputPath,
+            outputPath,
+            (input, output) => service.DecryptAsync(
+                input, output, password, limits, progress, cancellationToken));
+    }
 
     /// <summary>Decrypts the Argon2 container at <paramref name="inputPath"/> to <paramref name="outputPath"/>, using a password supplied as characters.</summary>
     /// <param name="service">The Argon2 service performing the operation.</param>
@@ -255,8 +344,17 @@ public static class DataEncryptionFileExtensions
         char[] password,
         DataEncryptionLimits? limits = null,
         IProgress<int>? progress = null,
-        CancellationToken cancellationToken = default) =>
-        throw new NotImplementedException();
+        CancellationToken cancellationToken = default)
+    {
+        ValidateTarget(service, inputPath, outputPath);
+        PasswordCredential.Validate(password, nameof(password));
+
+        return RunAsync(
+            inputPath,
+            outputPath,
+            (input, output) => service.DecryptAsync(
+                input, output, password, limits, progress, cancellationToken));
+    }
 
     // ---------------------------------------------------------------------------------------------
     // RSA
@@ -282,8 +380,18 @@ public static class DataEncryptionFileExtensions
         Cipher cipher,
         string publicKeyPem,
         IProgress<int>? progress = null,
-        CancellationToken cancellationToken = default) =>
-        throw new NotImplementedException();
+        CancellationToken cancellationToken = default)
+    {
+        ValidateTarget(service, inputPath, outputPath);
+        CipherResolver.ValidateArgument(cipher, nameof(cipher));
+        ValidatePem(publicKeyPem, nameof(publicKeyPem));
+
+        return RunAsync(
+            inputPath,
+            outputPath,
+            (input, output) => service.EncryptAsync(
+                input, output, cipher, publicKeyPem, progress, cancellationToken));
+    }
 
     /// <summary>Decrypts the RSA container at <paramref name="inputPath"/> to <paramref name="outputPath"/>.</summary>
     /// <param name="service">The RSA service performing the operation.</param>
@@ -309,8 +417,17 @@ public static class DataEncryptionFileExtensions
         char[]? keyPassword = null,
         DataEncryptionLimits? limits = null,
         IProgress<int>? progress = null,
-        CancellationToken cancellationToken = default) =>
-        throw new NotImplementedException();
+        CancellationToken cancellationToken = default)
+    {
+        ValidateTarget(service, inputPath, outputPath);
+        ValidatePem(privateKeyPem, nameof(privateKeyPem));
+
+        return RunAsync(
+            inputPath,
+            outputPath,
+            (input, output) => service.DecryptAsync(
+                input, output, privateKeyPem, keyPassword, limits, progress, cancellationToken));
+    }
 
     // ---------------------------------------------------------------------------------------------
     // ML-KEM
@@ -338,8 +455,19 @@ public static class DataEncryptionFileExtensions
         byte[] publicKey,
         MLKemParameterSet parameterSet = MLKemParameterSet.MLKem1024,
         IProgress<int>? progress = null,
-        CancellationToken cancellationToken = default) =>
-        throw new NotImplementedException();
+        CancellationToken cancellationToken = default)
+    {
+        ValidateTarget(service, inputPath, outputPath);
+        CipherResolver.ValidateArgument(cipher, nameof(cipher));
+        ValidateKemKey(publicKey, nameof(publicKey));
+        MLKemParameterSetWire.ValidateArgument(parameterSet, nameof(parameterSet));
+
+        return RunAsync(
+            inputPath,
+            outputPath,
+            (input, output) => service.EncryptAsync(
+                input, output, cipher, publicKey, parameterSet, progress, cancellationToken));
+    }
 
     /// <summary>Decrypts the ML-KEM container at <paramref name="inputPath"/> to <paramref name="outputPath"/>.</summary>
     /// <param name="service">The ML-KEM service performing the operation.</param>
@@ -364,6 +492,159 @@ public static class DataEncryptionFileExtensions
         byte[] privateKey,
         DataEncryptionLimits? limits = null,
         IProgress<int>? progress = null,
-        CancellationToken cancellationToken = default) =>
-        throw new NotImplementedException();
+        CancellationToken cancellationToken = default)
+    {
+        ValidateTarget(service, inputPath, outputPath);
+        ValidateKemKey(privateKey, nameof(privateKey));
+
+        return RunAsync(
+            inputPath,
+            outputPath,
+            (input, output) => service.DecryptAsync(
+                input, output, privateKey, limits, progress, cancellationToken));
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // The shared plumbing
+    // ---------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// Opens both files, runs <paramref name="operation"/> over them, and deletes the output on any
+    /// failure.
+    /// </summary>
+    /// <param name="inputPath">The file to read.</param>
+    /// <param name="outputPath">The file to write, create-or-overwrite.</param>
+    /// <param name="operation">The stream-based service call to delegate to.</param>
+    /// <returns>A task representing the operation.</returns>
+    /// <remarks>
+    /// <para>
+    /// The output handle lives in a nested scope <b>inside</b> the <c>try</c>, so it is flushed and closed
+    /// before the <c>catch</c> runs. Deleting a file this process still holds open fails on Windows, so the
+    /// ordering is what makes the cleanup actually work rather than merely be attempted.
+    /// </para>
+    /// <para>
+    /// A failure opening the input happens outside the <c>try</c>, where there is no output file to clean
+    /// up yet — the one case that must not delete anything.
+    /// </para>
+    /// </remarks>
+    private static async Task RunAsync(
+        string inputPath,
+        string outputPath,
+        Func<Stream, Stream, Task> operation)
+    {
+        using FileStream input = new(
+            inputPath, FileMode.Open, FileAccess.Read, FileShare.Read, FileBufferSize, useAsync: true);
+
+        try
+        {
+            using (FileStream output = new(
+                       outputPath, FileMode.Create, FileAccess.Write, FileShare.None, FileBufferSize,
+                       useAsync: true))
+            {
+                await operation(input, output).ConfigureAwait(false);
+            }
+        }
+        catch
+        {
+            TryDelete(outputPath);
+            throw;
+        }
+    }
+
+    /// <summary>Deletes a file, ignoring the failure modes a cleanup path must not turn into its own error.</summary>
+    /// <param name="path">The file to remove.</param>
+    private static void TryDelete(string path)
+    {
+        try
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+        catch (IOException)
+        {
+            // Best-effort by contract: the exception that caused the cleanup is the one worth reporting,
+            // and replacing it with "could not delete the partial output" would hide the real failure.
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // Same reasoning: a read-only or locked output file is not why the operation failed.
+        }
+    }
+
+    /// <summary>Validates the receiver and the two paths — everything these wrappers own themselves.</summary>
+    /// <param name="service">The service the extension method was invoked on.</param>
+    /// <param name="inputPath">The caller's input path.</param>
+    /// <param name="outputPath">The caller's output path.</param>
+    /// <exception cref="ArgumentNullException">Any argument is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">Either path is empty.</exception>
+    private static void ValidateTarget(object service, string inputPath, string outputPath)
+    {
+        if (service is null) throw new ArgumentNullException(nameof(service));
+        if (inputPath is null) throw new ArgumentNullException(nameof(inputPath));
+        if (outputPath is null) throw new ArgumentNullException(nameof(outputPath));
+
+        if (inputPath.Length == 0)
+        {
+            throw new ArgumentException("The input path must not be empty.", nameof(inputPath));
+        }
+
+        if (outputPath.Length == 0)
+        {
+            throw new ArgumentException("The output path must not be empty.", nameof(outputPath));
+        }
+    }
+
+    /// <summary>Validates a PEM-encoded key, matching <see cref="RsaDataEncryptionService"/>'s own check.</summary>
+    /// <param name="pem">The caller's PEM string.</param>
+    /// <param name="paramName">The name of the caller's parameter, for the exception.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="pem"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException"><paramref name="pem"/> is empty.</exception>
+    private static void ValidatePem(string pem, string paramName)
+    {
+        if (pem is null) throw new ArgumentNullException(paramName);
+
+        if (pem.Length == 0)
+        {
+            throw new ArgumentException("The PEM-encoded key must not be empty.", paramName);
+        }
+    }
+
+    /// <summary>Validates a raw ML-KEM key, matching <see cref="MLKemDataEncryptionService"/>'s own check.</summary>
+    /// <param name="key">The caller's key bytes.</param>
+    /// <param name="paramName">The name of the caller's parameter, for the exception.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="key"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException"><paramref name="key"/> is empty.</exception>
+    private static void ValidateKemKey(byte[] key, string paramName)
+    {
+        if (key is null) throw new ArgumentNullException(paramName);
+
+        if (key.Length == 0)
+        {
+            throw new ArgumentException("The ML-KEM key must not be empty.", paramName);
+        }
+    }
+
+    /// <summary>Bounds the three Argon2 cost parameters, matching <see cref="Argon2DataEncryptionService"/>.</summary>
+    /// <param name="iterations">Passes over memory.</param>
+    /// <param name="memorySizeKb">Memory cost in kibibytes.</param>
+    /// <param name="degreeOfParallelism">Parallel lanes.</param>
+    /// <exception cref="ArgumentOutOfRangeException">Any of the three is not greater than zero.</exception>
+    private static void ValidateArgon2Costs(int iterations, int memorySizeKb, int degreeOfParallelism)
+    {
+        RequirePositive(iterations, nameof(iterations), "The Argon2 iteration count");
+        RequirePositive(memorySizeKb, nameof(memorySizeKb), "The Argon2 memory size in KiB");
+        RequirePositive(degreeOfParallelism, nameof(degreeOfParallelism), "The Argon2 degree of parallelism");
+    }
+
+    /// <summary>Rejects a cost parameter that is not greater than zero.</summary>
+    /// <param name="value">The value supplied.</param>
+    /// <param name="paramName">The name of the caller's parameter, for the exception.</param>
+    /// <param name="description">How to name the parameter in the message.</param>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="value"/> is not greater than zero.</exception>
+    private static void RequirePositive(int value, string paramName, string description)
+    {
+        if (value <= 0)
+        {
+            throw new ArgumentOutOfRangeException(paramName, value, $"{description} must be greater than zero.");
+        }
+    }
 }

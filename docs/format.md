@@ -435,6 +435,11 @@ The exception a reader raises is part of the contract.
 The split is meaningful: **format** means *this is not a container I can parse*, **decryption** means
 *this is a valid container and I could not open it* — in practice, the wrong credential.
 
+**A header-only reader raises the format half alone.** Reading a header uses no credential and consumes
+no payload byte, so every row above that yields `DataDecryptionException` is unreachable for it: an
+inspector rejects a malformed container and reports an edited-but-valid cipher or parameter-set byte as
+it found it, because detecting *that* edit is the AAD's job (§5) and requires a key it does not have.
+
 ---
 
 ## 10. Reserved values — summary
