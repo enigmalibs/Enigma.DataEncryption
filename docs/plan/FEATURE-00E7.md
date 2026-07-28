@@ -1,6 +1,6 @@
 # FEATURE-00E7 — Binary format spec & public abstraction skeleton
 
-**Status:** TODO
+**Status:** DONE
 **Type:** FEATURE (single-phase)
 **Suggested branch:** `feature/feature-00e7-abstractions`
 **Depends on:** FEATURE-67FD

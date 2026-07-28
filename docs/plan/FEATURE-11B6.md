@@ -1,6 +1,6 @@
 # FEATURE-11B6 — Core implementation
 
-**Status:** TODO
+**Status:** DONE
 **Type:** FEATURE (5 phases)
 **Depends on:** FEATURE-00E7
 
@@ -32,7 +32,7 @@ meaningful.
 
 ## PHASE01 — Shared format infrastructure
 
-**Status:** TODO
+**Status:** DONE
 
 ### Scope
 
@@ -140,7 +140,7 @@ finding, caused by clearing outside `try/finally`. Do not repeat it.
 
 ## PHASE02 — Password-based services (PBKDF2 + Argon2)
 
-**Status:** TODO
+**Status:** DONE
 
 ### Scope
 
@@ -212,7 +212,7 @@ any work.
 
 ## PHASE03 — RSA service
 
-**Status:** TODO
+**Status:** DONE
 
 ### Scope
 
@@ -273,7 +273,7 @@ Enigma.Core's `RsaKeyFixture` does — key generation is slow and must not be re
 
 ## PHASE04 — ML-KEM service
 
-**Status:** TODO
+**Status:** DONE
 
 ### Scope
 
@@ -331,7 +331,7 @@ Notes:
 
 ## PHASE05 — Inspector, file extensions, DI & robustness suites
 
-**Status:** TODO
+**Status:** DONE
 
 ### Scope
 
