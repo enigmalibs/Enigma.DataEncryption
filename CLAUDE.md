@@ -242,6 +242,7 @@ written. Commits are left to the maintainer.
 The sequence is a hard dependency chain: `FEATURE-67FD` (done) → `FEATURE-00E7` (done — format spec +
 API skeleton) → `FEATURE-11B6` (done — all five phases) → **`FEATURE-07DA` (done — all four phases;
 v1.0.0 is prepared but *not published*, so the one step left is the maintainer running
-`docs/RELEASE.md`)**. `FEATURE-136E` (legacy decrypt) and `FEATURE-5A30`
-(hybrid method) are deferred by design and are not part of v1.0.0. `docs/roadmap.md` is authoritative
-for current status.
+`docs/RELEASE.md`)**. `FEATURE-5A30` (hybrid method `0x05`) is deferred by design and is not part of
+v1.0.0. `FEATURE-136E` (legacy decrypt) is **`ABANDONED`** — the predecessor-file migration need never
+materialized — though format versions `0x01`–`0x0F` stay reserved, so it could return as a new item
+without a redesign. `docs/roadmap.md` is authoritative for current status.
