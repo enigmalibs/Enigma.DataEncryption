@@ -173,7 +173,7 @@ and it is **not** required here.
 
 ## PHASE03 — README + release notes + community files
 
-**Status:** TODO
+**Status:** DONE — see `docs/done/FEATURE-07DA-PHASE03.md`
 
 ### `README.md` (repo root — **packed**, and the nuget.org landing page)
 

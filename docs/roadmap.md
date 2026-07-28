@@ -18,7 +18,7 @@ Status vocabulary: `TODO`, `IN PROGRESS`, `DONE`, `ABANDONED`.
 | FEATURE-07DA | NuGet release preparation (v1.0.0)                         | IN PROGRESS | docs/plan/FEATURE-07DA.md |
 | - PHASE01    | Package metadata & build config + license audit            | DONE   | (in FEATURE-07DA.md)      |
 | - PHASE02    | Per-category guides & index                                | DONE   | (in FEATURE-07DA.md)      |
-| - PHASE03    | README + release notes + community files                    | TODO   | (in FEATURE-07DA.md)      |
+| - PHASE03    | README + release notes + community files                    | DONE   | (in FEATURE-07DA.md)      |
 | - PHASE04    | Release runbook, pack-verify & final cut prep              | TODO   | (in FEATURE-07DA.md)      |
 | FEATURE-136E | Legacy decrypt support for predecessor files (deferred)    | TODO   | docs/plan/FEATURE-136E.md |
 | FEATURE-5A30 | True hybrid RSA + ML-KEM method `0x05` (deferred)          | TODO   | docs/plan/FEATURE-5A30.md |
