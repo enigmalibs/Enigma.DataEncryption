@@ -404,6 +404,8 @@ The exception a reader raises is part of the contract.
 | GCM authentication failure (`CryptographicException`) | `DataDecryptionException`, wrapping it |
 | RSA OAEP unwrap failure, **including an undecryptable private-key PEM** (`CryptographicException`) | `DataDecryptionException`, wrapping it |
 | Malformed / unparseable private-key PEM | propagates from Enigma.Core (`ArgumentException` / `FormatException`) — **not** wrapped, since it is a credential-supply error, not a file-content error |
+| ML-KEM decapsulation failure, **including a private key that is malformed or for another parameter set** (`CryptographicException`) | `DataDecryptionException`, wrapping it |
+| ML-KEM encapsulation failure — the caller's public key is malformed or for another parameter set (`CryptographicException`) | `ArgumentException` on `publicKey`, wrapping it |
 | Null / empty / out-of-range arguments | `ArgumentNullException` / `ArgumentException` / `ArgumentOutOfRangeException` |
 | Cancellation | `OperationCanceledException` |
 
@@ -415,6 +417,17 @@ The exception a reader raises is part of the contract.
 > `InnerException`, where the specific cause stays readable. A PEM that cannot be *parsed* does keep its
 > own identity, because `ArgumentException` and `FormatException` are unambiguous. The credential-supply
 > versus file-content split therefore holds wherever the underlying library lets it be observed.
+
+> **Why ML-KEM is asymmetric between the two directions.** Enigma.Core's `Decapsulate` raises a single
+> `CryptographicException` whose own message names three causes at once — a malformed ciphertext, a
+> malformed private key, or either being for a different parameter set. Two of those point in opposite
+> directions: a wrong-length key is the *caller's* problem, an edited parameter-set byte is the
+> *container's*. Since they are indistinguishable without matching on message text, both are reported as
+> `DataDecryptionException`, because announcing an argument error for a tampered file would be the worse
+> of the two mistakes. `Encapsulate` has no such ambiguity — it takes the public key and nothing else, so
+> a failure can only be about the key the caller supplied, and it is reported as `ArgumentException` on
+> `publicKey`. Enigma.Core's RSA path already reports an unusable public key that way, so the two methods
+> agree on the encrypt side.
 
 `DataEncryptionFormatException` and `DataDecryptionException` both derive from
 `DataEncryptionException`, so a caller that does not care which can catch the base type.

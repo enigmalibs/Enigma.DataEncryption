@@ -4,7 +4,8 @@ Guidance for Claude Code (and other AI agents) working in this repository.
 
 ## Current state
 
-**The shape is settled; the behaviour is half filled in.** `FEATURE-67FD` stood up the git repo, the
+**The shape is settled; all four encryption methods work, and the surrounding plumbing is what remains.**
+`FEATURE-67FD` stood up the git repo, the
 root configuration, the multi-targeted library and an MTP-native xUnit v3 test project. `FEATURE-00E7`
 then added the normative format spec (`docs/format.md`) and the **complete public API surface** — enums,
 constants, limits, the header record, the exception hierarchy, five service interfaces with their
@@ -22,17 +23,29 @@ computed outside this library (Python's `hashlib`/`hmac`, OpenSSL's `ARGON2ID`, 
 and `Internal/PasswordCredential.cs` for the phases that follow. **`PHASE03` is done:** the RSA service
 transports its data key under RSAES-OAEP-SHA256, with golden vectors that pin every byte OAEP's own
 randomness allows (the wrapped key is the exception, and the suite says so) and committed PEM fixtures for
-the read path. **`PHASE04` (next)** fills in the ML-KEM service.
+the read path. **`PHASE04` is done:** the ML-KEM service takes the encapsulated shared secret directly as its
+data key — the one method that draws no key material of its own — and the key-confirmation tag finally earns
+its keep, since FIPS 203 implicit rejection makes decapsulation with a wrong key *succeed*; the suite proves
+that against Enigma.Core first, then proves the tag rejects it before a payload byte is read.
+**`PHASE05` (next)** fills in the inspector, the file-path extensions and the cross-cutting robustness suites.
 
-**Two service bodies still throw `NotImplementedException`** — ML-KEM and the inspector — as do the
-twelve file-path extension methods. PBKDF2, Argon2 and RSA are real, and so are
-`AddEnigmaDataEncryption()` and `RandomSource` (both since `FEATURE-00E7`).
+**One service body still throws `NotImplementedException`** — the inspector — as do the twelve file-path
+extension methods. All four encryption services are real, and so are `AddEnigmaDataEncryption()` and
+`RandomSource` (both since `FEATURE-00E7`).
 
 One thing PHASE03 settled that matters beyond it: **Enigma.Core reports a wrong RSA private key and an
 undecryptable private-key PEM identically**, so `docs/format.md` §9 now wraps both as
 `DataDecryptionException` (cause preserved as `InnerException`) and reserves the propagate-unwrapped rule
 for PEMs that cannot be *parsed* (`ArgumentException` / `FormatException`). Do not try to re-split them by
 message text.
+
+**PHASE04 hit the same wall and applied the same rule, so §9 is now asymmetric between the two ML-KEM
+directions on purpose.** `Decapsulate` raises one `CryptographicException` for a malformed private key, a key
+for another parameter set, *and* a container whose parameter-set byte was edited — the caller's fault and the
+file's fault, indistinguishable without message text. All three therefore wrap as `DataDecryptionException`,
+because announcing an argument error for a tampered file is the worse mistake (and PHASE05's malformed-input
+sweep admits only the two container exception types). `Encapsulate` has no such ambiguity — it takes the
+public key and nothing else — so it becomes `ArgumentException` on `publicKey`. Do not "fix" the asymmetry.
 
 `docs/format.md` is the contract for all of it. Read it and the relevant `docs/plan/<ID>.md` before
 implementing.
@@ -202,6 +215,6 @@ plan's acceptance criteria are met, the roadmap/plan statuses are updated, and t
 written. Commits are left to the maintainer.
 
 The sequence is a hard dependency chain: `FEATURE-67FD` (done) → `FEATURE-00E7` (done — format spec +
-API skeleton) → **`FEATURE-11B6` (in progress: PHASE01–PHASE03 done, PHASE04 next)** → `FEATURE-07DA` (v1.0.0 release,
+API skeleton) → **`FEATURE-11B6` (in progress: PHASE01–PHASE04 done, PHASE05 next)** → `FEATURE-07DA` (v1.0.0 release,
 4 phases). `FEATURE-136E` (legacy decrypt) and `FEATURE-5A30` (hybrid method) are deferred by design
 and are not part of v1.0.0. `docs/roadmap.md` is authoritative for current status.

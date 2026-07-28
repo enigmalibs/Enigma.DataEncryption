@@ -291,6 +291,63 @@ internal sealed class CountingSink(int headerLength, Action onFirstPayloadWrite)
 }
 
 /// <summary>
+/// A write-only sink that accepts <paramref name="acceptBytes"/> bytes and then fails.
+/// </summary>
+/// <remarks>
+/// This exists to make an encryption fail <b>after</b> its key material has been established but before it
+/// finishes — the only way to exercise the <c>finally</c> on the encrypt side of a method whose data key comes
+/// from the credential rather than from the caller. ML-KEM is that method: a public key Enigma.Core cannot use
+/// fails at encapsulation, before any shared secret exists, so a key-clearing test needs the failure to happen
+/// later than that.
+/// </remarks>
+/// <param name="acceptBytes">How many bytes to accept before throwing — in practice, the header length.</param>
+internal sealed class ThrowAfterStream(int acceptBytes) : Stream
+{
+    private long _written;
+
+    public override bool CanRead => false;
+
+    public override bool CanSeek => false;
+
+    public override bool CanWrite => true;
+
+    public override long Length => _written;
+
+    public override long Position
+    {
+        get => _written;
+        set => throw new NotSupportedException();
+    }
+
+    public override void Write(byte[] buffer, int offset, int count)
+    {
+        if (_written + count > acceptBytes)
+        {
+            throw new IOException(
+                $"This sink accepts {acceptBytes} bytes; the payload stage must not have got this far unnoticed.");
+        }
+
+        _written += count;
+    }
+
+    public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+    {
+        Write(buffer, offset, count);
+        return Task.CompletedTask;
+    }
+
+    public override void Flush()
+    {
+    }
+
+    public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+    public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+    public override void SetLength(long value) => throw new NotSupportedException();
+}
+
+/// <summary>
 /// A read-through wrapper that cancels a token once <paramref name="threshold"/> bytes have been read.
 /// </summary>
 /// <remarks>

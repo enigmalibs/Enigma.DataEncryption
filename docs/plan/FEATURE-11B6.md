@@ -273,7 +273,7 @@ Enigma.Core's `RsaKeyFixture` does — key generation is slow and must not be re
 
 ## PHASE04 — ML-KEM service
 
-**Status:** TODO
+**Status:** DONE
 
 ### Scope
 

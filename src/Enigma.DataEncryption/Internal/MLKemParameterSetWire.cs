@@ -38,6 +38,30 @@ internal static class MLKemParameterSetWire
             nameof(parameterSet), parameterSet, "Undefined ML-KEM parameter set."),
     };
 
+    /// <summary>Validates a <see cref="MLKemParameterSet"/> supplied by a caller.</summary>
+    /// <param name="parameterSet">The value the caller passed.</param>
+    /// <param name="paramName">The name of the caller's parameter, for the exception.</param>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="parameterSet"/> is not a defined value.</exception>
+    /// <remarks>
+    /// Separate from <see cref="ToWireByte"/> — which rejects the same values — so that a service can fault
+    /// synchronously, before it returns a task and before it draws a nonce or touches a key. Enigma.Core's
+    /// own factory would reject the value too, but only after the call has already started.
+    /// </remarks>
+    internal static void ValidateArgument(MLKemParameterSet parameterSet, string paramName)
+    {
+        switch (parameterSet)
+        {
+            case MLKemParameterSet.MLKem512:
+            case MLKemParameterSet.MLKem768:
+            case MLKemParameterSet.MLKem1024:
+                return;
+
+            default:
+                throw new ArgumentOutOfRangeException(
+                    paramName, parameterSet, "Undefined ML-KEM parameter set.");
+        }
+    }
+
     /// <summary>Maps a header byte to its parameter set.</summary>
     /// <param name="value">The byte read from header offset 5.</param>
     /// <returns>The corresponding parameter set.</returns>

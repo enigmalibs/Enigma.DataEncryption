@@ -64,7 +64,7 @@ public interface IMLKemDataEncryptionService
     /// <paramref name="publicKey"/> is not.
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="input"/>, <paramref name="output"/> or <paramref name="publicKey"/> is <see langword="null"/>.</exception>
-    /// <exception cref="ArgumentException"><paramref name="publicKey"/> is empty or the wrong length for <paramref name="parameterSet"/>, or <paramref name="cipher"/> / <paramref name="parameterSet"/> is not a defined value.</exception>
+    /// <exception cref="ArgumentException"><paramref name="publicKey"/> is empty, or is malformed or the wrong length for <paramref name="parameterSet"/>, or <paramref name="cipher"/> / <paramref name="parameterSet"/> is not a defined value.</exception>
     /// <exception cref="OperationCanceledException">The operation was cancelled.</exception>
     Task EncryptAsync(
         Stream input,
@@ -110,9 +110,16 @@ public interface IMLKemDataEncryptionService
     /// </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="input"/>, <paramref name="output"/> or <paramref name="privateKey"/> is <see langword="null"/>.</exception>
-    /// <exception cref="ArgumentException"><paramref name="privateKey"/> is empty or the wrong length for the header's parameter set.</exception>
+    /// <exception cref="ArgumentException"><paramref name="privateKey"/> is empty.</exception>
     /// <exception cref="DataEncryptionFormatException">The header is not a valid ML-KEM container, its parameter-set byte is undefined, or the encapsulation length is out of bounds.</exception>
-    /// <exception cref="DataDecryptionException">The private key does not match the container (key-confirmation mismatch), or the payload fails authentication.</exception>
+    /// <exception cref="DataDecryptionException">
+    /// The private key does not match the container (key-confirmation mismatch), the payload fails
+    /// authentication, or the shared secret could not be decapsulated at all — the last covering a
+    /// <paramref name="privateKey"/> that is malformed or is for a different parameter set. Those cases are
+    /// <b>not</b> separated into an argument error, because Enigma.Core reports them identically to a
+    /// container whose parameter-set byte has been edited; the original exception is preserved as
+    /// <see cref="System.Exception.InnerException"/>. See <c>docs/format.md</c> §9.
+    /// </exception>
     /// <exception cref="OperationCanceledException">The operation was cancelled.</exception>
     Task DecryptAsync(
         Stream input,
