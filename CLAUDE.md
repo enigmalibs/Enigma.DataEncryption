@@ -206,8 +206,12 @@ Tests are **MTP-native**: `xunit.v3` + `coverlet.collector`, with **no** `Micros
 - **Documentation.** Public APIs carry XML doc comments (`GenerateDocumentationFile=true`), so a
   missing comment fails the build. Per-category usage guides will live under `docs/guides/`
   (`FEATURE-07DA`).
-- **Packaging metadata** (`PackageId`, `Version`, `Description`, …) is deliberately absent from the
-  library csproj until release time (`FEATURE-07DA`), per the `dotnet-release` skill.
+- **Packaging metadata.** All 12 NuGet properties are now present in the library csproj
+  (`FEATURE-07DA` PHASE01), together with the `None` `ItemGroup` that packs `README.md` and
+  `LICENSE.md`. Two omissions there are deliberate, not oversights: **`GeneratePackageOnBuild` is
+  off** (the package is packed explicitly by the release step, never on every local build) and **no
+  symbol properties** are set, so a release ships exactly one file, the `.nupkg`. `PackageReleaseNotes`
+  is provisional until PHASE03 writes `RELEASENOTES.md` for it to mirror.
 
 ## Dev workflow (tracked work)
 
@@ -224,6 +228,7 @@ plan's acceptance criteria are met, the roadmap/plan statuses are updated, and t
 written. Commits are left to the maintainer.
 
 The sequence is a hard dependency chain: `FEATURE-67FD` (done) → `FEATURE-00E7` (done — format spec +
-API skeleton) → `FEATURE-11B6` (done — all five phases) → **`FEATURE-07DA` (next: v1.0.0 release, 4
-phases)**. `FEATURE-136E` (legacy decrypt) and `FEATURE-5A30` (hybrid method) are deferred by design
-and are not part of v1.0.0. `docs/roadmap.md` is authoritative for current status.
+API skeleton) → `FEATURE-11B6` (done — all five phases) → **`FEATURE-07DA` (in progress — v1.0.0
+release, 4 phases; PHASE01 done, PHASE02 next)**. `FEATURE-136E` (legacy decrypt) and `FEATURE-5A30`
+(hybrid method) are deferred by design and are not part of v1.0.0. `docs/roadmap.md` is authoritative
+for current status.

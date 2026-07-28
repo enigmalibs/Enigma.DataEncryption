@@ -15,8 +15,8 @@ Status vocabulary: `TODO`, `IN PROGRESS`, `DONE`, `ABANDONED`.
 | - PHASE03    | RSA service                                                | DONE   | (in FEATURE-11B6.md)      |
 | - PHASE04    | ML-KEM service                                             | DONE   | (in FEATURE-11B6.md)      |
 | - PHASE05    | Inspector, file extensions, DI & robustness suites          | DONE   | (in FEATURE-11B6.md)      |
-| FEATURE-07DA | NuGet release preparation (v1.0.0)                         | TODO   | docs/plan/FEATURE-07DA.md |
-| - PHASE01    | Package metadata & build config + license audit            | TODO   | (in FEATURE-07DA.md)      |
+| FEATURE-07DA | NuGet release preparation (v1.0.0)                         | IN PROGRESS | docs/plan/FEATURE-07DA.md |
+| - PHASE01    | Package metadata & build config + license audit            | DONE   | (in FEATURE-07DA.md)      |
 | - PHASE02    | Per-category guides & index                                | TODO   | (in FEATURE-07DA.md)      |
 | - PHASE03    | README + release notes + community files                    | TODO   | (in FEATURE-07DA.md)      |
 | - PHASE04    | Release runbook, pack-verify & final cut prep              | TODO   | (in FEATURE-07DA.md)      |
