@@ -153,6 +153,7 @@ tests/Enigma.DataEncryption.UnitTests/   xUnit v3 test suite
                                      Fixtures/ — committed containers & expected plaintext
 docs/format.md                       Normative binary-format specification (the contract)
 docs/guides/                         Per-category usage guides + index (README.md) — repo-only, not packed
+docs/RELEASE.md                      Release runbook (FEATURE-07DA PHASE04) — pre-flight, merge, tag, pack, push
 docs/roadmap.md                      Work-item registry
 docs/plan/                           Per-item plans
 docs/done/                           Per-dev completion records
@@ -239,8 +240,8 @@ plan's acceptance criteria are met, the roadmap/plan statuses are updated, and t
 written. Commits are left to the maintainer.
 
 The sequence is a hard dependency chain: `FEATURE-67FD` (done) → `FEATURE-00E7` (done — format spec +
-API skeleton) → `FEATURE-11B6` (done — all five phases) → **`FEATURE-07DA` (in progress — v1.0.0
-release, 4 phases; PHASE01–03 done, PHASE04 next — the release runbook and the local pack-verify)**.
-`FEATURE-136E` (legacy decrypt) and `FEATURE-5A30`
+API skeleton) → `FEATURE-11B6` (done — all five phases) → **`FEATURE-07DA` (done — all four phases;
+v1.0.0 is prepared but *not published*, so the one step left is the maintainer running
+`docs/RELEASE.md`)**. `FEATURE-136E` (legacy decrypt) and `FEATURE-5A30`
 (hybrid method) are deferred by design and are not part of v1.0.0. `docs/roadmap.md` is authoritative
 for current status.

@@ -1,6 +1,6 @@
 # FEATURE-07DA — NuGet release preparation (v1.0.0)
 
-**Status:** IN PROGRESS
+**Status:** DONE (all four phases)
 **Type:** FEATURE (4 phases — the `dotnet-release` **first release** shape)
 **Depends on:** FEATURE-11B6 (complete)
 
@@ -258,7 +258,7 @@ Update property 11 in the csproj to prose mirroring the top of `RELEASENOTES.md`
 
 ## PHASE04 — Release runbook, pack-verify & final cut prep
 
-**Status:** TODO
+**Status:** DONE — see `docs/done/FEATURE-07DA-PHASE04.md`
 
 ### `docs/RELEASE.md`
 
