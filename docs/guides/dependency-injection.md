@@ -1,7 +1,7 @@
 # Dependency injection
 
 Enigma.DataEncryption registers with a Microsoft.Extensions.DependencyInjection container through one
-call: `services.AddEnigmaDataEncryption()`. It registers the four encryption services, the inspector, and
+call: `services.AddEnigmaDataEncryption()`. It registers the five encryption services, the inspector, and
 the Enigma.Core factories they depend on — all as singletons, all with `TryAdd` — and returns the same
 collection for chaining.
 
@@ -33,6 +33,7 @@ instance.
 | `IArgon2DataEncryptionService` | `Argon2DataEncryptionService` | Singleton |
 | `IRsaDataEncryptionService` | `RsaDataEncryptionService` | Singleton |
 | `IMLKemDataEncryptionService` | `MLKemDataEncryptionService` | Singleton |
+| `IHybridDataEncryptionService` | `HybridDataEncryptionService` | Singleton |
 | `IEncryptedDataInspector` | `EncryptedDataInspector` | Singleton |
 
 **Enigma.Core's factories**, which those services consume. Enigma.Core deliberately ships no
@@ -54,7 +55,7 @@ synchronisation.
 
 **Every registration uses `TryAdd`**, so a consumer who has already registered their own implementation of
 any of these keeps it. Register a custom `IBlockCipherServiceFactory` first and
-`AddEnigmaDataEncryption()` will build the four services on top of yours.
+`AddEnigmaDataEncryption()` will build the five services on top of yours.
 
 ## Key types
 
@@ -190,13 +191,14 @@ IPbkdf2DataEncryptionService pbkdf2 = provider.GetRequiredService<IPbkdf2DataEnc
 IArgon2DataEncryptionService argon2 = provider.GetRequiredService<IArgon2DataEncryptionService>();
 IRsaDataEncryptionService rsa = provider.GetRequiredService<IRsaDataEncryptionService>();
 IMLKemDataEncryptionService mlKem = provider.GetRequiredService<IMLKemDataEncryptionService>();
+IHybridDataEncryptionService hybrid = provider.GetRequiredService<IHybridDataEncryptionService>();
 IEncryptedDataInspector inspector = provider.GetRequiredService<IEncryptedDataInspector>();
 
 // Singletons: resolving twice returns the same instance.
 Console.WriteLine(ReferenceEquals(argon2, provider.GetRequiredService<IArgon2DataEncryptionService>()));  // True
 ```
 
-See [Header inspection](header-inspection.md) for the detect-then-dispatch pattern these five enable.
+See [Header inspection](header-inspection.md) for the detect-then-dispatch pattern these six enable.
 
 ### Override a registration
 
@@ -213,7 +215,7 @@ ServiceCollection services = new();
 // IBlockCipherServiceFactory here, e.g. one that counts invocations or enforces a policy.
 services.AddSingleton<IBlockCipherServiceFactory>(new BlockCipherServiceFactory());
 
-// The four services are now built on top of yours; every other registration is added as usual.
+// The five services are now built on top of yours; every other registration is added as usual.
 services.AddEnigmaDataEncryption();
 ```
 
@@ -250,6 +252,7 @@ IPbkdf2DataEncryptionService pbkdf2 = new Pbkdf2DataEncryptionService();
 IArgon2DataEncryptionService argon2 = new Argon2DataEncryptionService();
 IRsaDataEncryptionService rsa = new RsaDataEncryptionService();
 IMLKemDataEncryptionService mlKem = new MLKemDataEncryptionService();
+IHybridDataEncryptionService hybrid = new HybridDataEncryptionService();
 IEncryptedDataInspector inspector = new EncryptedDataInspector();
 
 char[] password = "correct horse battery staple".ToCharArray();
@@ -290,6 +293,10 @@ IRsaDataEncryptionService rsa =
 
 IMLKemDataEncryptionService mlKem =
     new MLKemDataEncryptionService(blockCiphers, new MLKemServiceFactory(), hmacs);
+
+// The hybrid takes four factories rather than three — it drives both public-key primitives.
+IHybridDataEncryptionService hybrid = new HybridDataEncryptionService(
+    blockCiphers, new PublicKeyServiceFactory(), new MLKemServiceFactory(), hmacs);
 ```
 
 This is the constructor a container resolves. Each parameter throws `ArgumentNullException` if `null`.

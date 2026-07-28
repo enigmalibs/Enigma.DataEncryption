@@ -30,7 +30,7 @@ There are no algorithm choices to make on the RSA side: the wrap is always RSAES
 the data-key size (32 bytes), nonce size (12 bytes) and tag size (128 bits) are fixed invariants of the
 format. The only degree of freedom is `cipher`, which selects the 256-bit GCM cipher protecting the
 payload. **No public-key fingerprint is stored** — an OAEP unwrap already fails fast on the wrong key,
-and the header's key-confirmation tag covers wrong-credential detection uniformly across all four
+and the header's key-confirmation tag covers wrong-credential detection uniformly across all five
 methods.
 
 ## Key types
@@ -283,6 +283,11 @@ methods in [File operations](file-operations.md), which delete the partial outpu
 - **This gives confidentiality, not authenticity.** Anyone with the recipient's public key can produce a
   valid container, so a successful decrypt proves the container was made for you — not who made it. Sign
   separately if you need sender authentication.
+- **This method is not quantum-resistant.** RSA falls to a sufficiently large quantum computer, so a
+  container that must stay confidential beyond that horizon should not rely on RSA alone. Use
+  [`IHybridDataEncryptionService`](hybrid.md), which combines an RSA-transported secret with an ML-KEM
+  encapsulated one so that breaking either primitive is not enough — or
+  [`IMLKemDataEncryptionService`](ml-kem.md) if you are willing to rely on the lattice assumption alone.
 - **The RSA operation covers only the 32-byte data key**, so the key size constrains nothing about the
   payload size. Choose the key size for its own reasons; 2048 bits is the practical minimum, 3072 or
   4096 for a longer horizon.

@@ -1,14 +1,15 @@
 namespace Enigma.DataEncryption.Internal;
 
 /// <summary>
-/// The container format's fixed wire layout: the magic bytes and the four header lengths of
+/// The container format's fixed wire layout: the magic bytes and the five header lengths of
 /// <c>docs/format.md</c> §3.
 /// </summary>
 /// <remarks>
 /// The lengths are <b>computed</b> from <see cref="DataEncryptionDefaults"/> rather than written as
 /// literals, so a field size cannot move without every length moving with it.
-/// <c>FormatConstantsTests</c> and <c>HeaderLayoutTests</c> pin the resulting numbers
-/// (53 / 61 / 37 + N / 38 + N) against the specification, which is what keeps this arithmetic honest.
+/// <c>FormatConstantsTests</c> and <c>FormatLayoutTests</c> pin the resulting numbers
+/// (53 / 61 / 37 + N / 38 + N / 42 + N + M) against the specification, which is what keeps this
+/// arithmetic honest.
 /// </remarks>
 internal static class FormatLayout
 {
@@ -71,4 +72,37 @@ internal static class FormatLayout
         + DataEncryptionDefaults.NonceSizeBytes
         + Int32Length
         + DataEncryptionDefaults.KeyConfirmationTagSizeBytes;
+
+    /// <summary>
+    /// Hybrid header length <b>excluding</b> both variable-length fields: prefix + parameter set +
+    /// nonce + two length fields + tag. 42 bytes; the total is this plus the wrapped-secret length
+    /// <c>N</c> plus the encapsulation length <c>M</c>.
+    /// </summary>
+    /// <remarks>
+    /// Four bytes longer than <see cref="MLKemHeaderBaseLength"/>, and the difference is the second
+    /// <see cref="Int32Length"/> length field — the hybrid carries two variable-length fields where
+    /// every other method carries at most one. See <c>docs/format.md</c> §3.5.
+    /// </remarks>
+    internal const int HybridHeaderBaseLength =
+        CommonPrefixLength
+        + ParameterSetLength
+        + DataEncryptionDefaults.NonceSizeBytes
+        + (2 * Int32Length)
+        + DataEncryptionDefaults.KeyConfirmationTagSizeBytes;
+
+    /// <summary>
+    /// Offset of the hybrid header's encapsulation length field, given the wrapped-secret length.
+    /// </summary>
+    /// <param name="wrappedSecretLength">The wrapped-secret length <c>N</c>.</param>
+    /// <returns><c>22 + N</c>.</returns>
+    /// <remarks>
+    /// Exists so that the key combiner's transcript (<c>docs/format.md</c> §3.5.1) can be described, and
+    /// asserted, as the contiguous header slice it is.
+    /// </remarks>
+    internal static int HybridEncapsulationLengthOffset(int wrappedSecretLength) =>
+        HybridWrappedSecretLengthOffset + Int32Length + wrappedSecretLength;
+
+    /// <summary>Offset of the hybrid header's wrapped-secret length field: 18.</summary>
+    internal const int HybridWrappedSecretLengthOffset =
+        CommonPrefixLength + ParameterSetLength + DataEncryptionDefaults.NonceSizeBytes;
 }

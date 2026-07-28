@@ -157,6 +157,54 @@ internal static class HeaderWriter
             .ConfigureAwait(false);
     }
 
+    /// <summary>Writes a hybrid RSA + ML-KEM (method <c>0x05</c>) header. 42 + <c>N</c> + <c>M</c> bytes.</summary>
+    /// <param name="output">The container stream, positioned where the header begins.</param>
+    /// <param name="cipher">The payload cipher, already validated.</param>
+    /// <param name="parameterSet">The ML-KEM parameter set the encapsulation was produced under.</param>
+    /// <param name="nonce">The 12-byte GCM nonce.</param>
+    /// <param name="wrappedRsaSecret">The RSAES-OAEP-wrapped secret; its length becomes <c>N</c>.</param>
+    /// <param name="encapsulation">The ML-KEM encapsulation; its length becomes <c>M</c>.</param>
+    /// <param name="dataKey">The 32-byte <b>combined</b> data key, used to compute the key-confirmation tag.</param>
+    /// <param name="hmacSha256">An HMAC-SHA256 service.</param>
+    /// <param name="cancellationToken">Token to cancel the write.</param>
+    /// <returns>The complete header bytes, to be passed as the GCM associated data.</returns>
+    /// <remarks>
+    /// <para>
+    /// The only shape with two variable-length fields, each preceded by its own length — see
+    /// <c>docs/format.md</c> §3.5. The first 18 bytes match an ML-KEM header's but for the method byte:
+    /// the parameter-set byte precedes the nonce here too.
+    /// </para>
+    /// <para>
+    /// <paramref name="dataKey"/> must already be the output of <see cref="HybridKeyCombiner.Combine"/>,
+    /// not either input secret. Nothing here can check that, which is why the two callers on the service
+    /// combine before they write and the golden vectors pin the resulting tag.
+    /// </para>
+    /// </remarks>
+    internal static async Task<byte[]> WriteHybridHeaderAsync(
+        Stream output,
+        Cipher cipher,
+        MLKemParameterSet parameterSet,
+        byte[] nonce,
+        byte[] wrappedRsaSecret,
+        byte[] encapsulation,
+        byte[] dataKey,
+        IHmacService hmacSha256,
+        CancellationToken cancellationToken)
+    {
+        using MemoryStream buffer = new(
+            FormatLayout.HybridHeaderBaseLength + wrappedRsaSecret.Length + encapsulation.Length);
+        WriteCommonPrefix(buffer, EncryptionMethod.Hybrid, cipher);
+        buffer.WriteByte(MLKemParameterSetWire.ToWireByte(parameterSet));
+        buffer.WriteBytes(nonce);
+        buffer.WriteInt(wrappedRsaSecret.Length);
+        buffer.WriteBytes(wrappedRsaSecret);
+        buffer.WriteInt(encapsulation.Length);
+        buffer.WriteBytes(encapsulation);
+
+        return await SealAndWriteAsync(output, buffer, dataKey, hmacSha256, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
     private static void WriteCommonPrefix(Stream buffer, EncryptionMethod method, Cipher cipher)
     {
         buffer.WriteByte(FormatLayout.MagicByte0);

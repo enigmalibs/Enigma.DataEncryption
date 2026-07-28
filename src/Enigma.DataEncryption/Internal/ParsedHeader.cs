@@ -50,12 +50,18 @@ internal sealed record ParsedHeader
     /// <summary>The 16-byte KDF salt. Populated for PBKDF2 and Argon2 only.</summary>
     internal byte[]? Salt { get; init; }
 
-    /// <summary>The RSAES-OAEP-wrapped data key. Populated for RSA only.</summary>
+    /// <summary>
+    /// The RSAES-OAEP ciphertext. Populated for RSA and the hybrid — where it carries the data key
+    /// itself for method <c>0x03</c> and one of the combiner's two input secrets for method <c>0x05</c>.
+    /// </summary>
     internal byte[]? WrappedKey { get; init; }
 
-    /// <summary>The ML-KEM encapsulation. Populated for ML-KEM only.</summary>
+    /// <summary>The ML-KEM encapsulation. Populated for ML-KEM and the hybrid.</summary>
     internal byte[]? Encapsulation { get; init; }
 
-    /// <summary>The ML-KEM parameter set from header offset 5. Populated for ML-KEM only.</summary>
+    /// <summary>
+    /// The ML-KEM parameter set from header offset 5. Populated for ML-KEM and the hybrid, which share
+    /// both the field and its offset.
+    /// </summary>
     internal MLKemParameterSet? MLKemParameterSet { get; init; }
 }

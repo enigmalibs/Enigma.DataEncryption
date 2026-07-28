@@ -120,6 +120,7 @@ public sealed class HeaderGoldenBytesTests
     [InlineData(HeaderShape.Argon2, 0x02)]
     [InlineData(HeaderShape.Rsa, 0x03)]
     [InlineData(HeaderShape.MLKem, 0x04)]
+    [InlineData(HeaderShape.Hybrid, 0x05)]
     public async Task EveryShape_StartsWithTheSpecifiedCommonPrefix(HeaderShape shape, byte methodByte)
     {
         byte[] header = await FormatTestData.BuildHeaderAsync(shape, Cipher.Serpent256Gcm);
@@ -177,14 +178,106 @@ public sealed class HeaderGoldenBytesTests
             header[22..(22 + FormatTestData.MLKemEncapsulationLength)]);
     }
 
+    // --- The hybrid shape, field by field (§3.5) ---------------------------------------------------
+
+    /// <summary>
+    /// The whole 1,066-byte hybrid header, asserted offset by offset rather than as one expected array:
+    /// the parameter-set byte at 5, the nonce at 6, the first length field at 18, the RSAES-OAEP
+    /// ciphertext at 22, and then — the part unique to this shape — a <b>second</b> length field at
+    /// 22 + <c>N</c> followed by the encapsulation at 26 + <c>N</c>.
+    /// </summary>
+    /// <remarks>
+    /// A 1,066-byte expected literal would be unreadable and would not localise a failure, which is why
+    /// this shape gets a field walk where PBKDF2 and Argon2 get byte arrays. The invariants an array would
+    /// have caught are covered individually: both length fields are asserted little-endian, both values
+    /// are asserted at their offsets, and the tag is asserted by
+    /// <see cref="TheLast16Bytes_AreTheKeyConfirmationTagOverEverythingBefore"/>.
+    /// </remarks>
+    [Fact]
+    public async Task HybridHeader_HasEveryFieldAtItsSpecifiedOffset()
+    {
+        const int n = FormatTestData.RsaWrappedKeyLength;      // 256
+        const int m = FormatTestData.MLKemEncapsulationLength; // 768
+        byte[] header = await FormatTestData.BuildHeaderAsync(HeaderShape.Hybrid, Cipher.Camellia256Gcm);
+
+        Assert.Equal(42 + n + m, header.Length);
+
+        Assert.Equal<byte[]>([0xEC, 0xDE], header[..2]);
+        Assert.Equal(0x05, header[2]);
+        Assert.Equal(0x10, header[3]);
+        Assert.Equal(0x04, header[4]); // Camellia-256-GCM
+
+        // ML-KEM-512 — the wire byte, not the enum's 0.
+        Assert.Equal(0x01, header[5]);
+        Assert.Equal(FormatTestData.Nonce(), header[6..18]);
+
+        // 256 little-endian is 00 01 00 00; big-endian would be 00 00 01 00.
+        Assert.Equal<byte[]>([0x00, 0x01, 0x00, 0x00], header[18..22]);
+        Assert.Equal(FormatTestData.WrappedKey(), header[22..(22 + n)]);
+
+        // The second length field, at 22 + N = 278. 768 little-endian is 00 03 00 00.
+        Assert.Equal<byte[]>([0x00, 0x03, 0x00, 0x00], header[(22 + n)..(26 + n)]);
+        Assert.Equal(FormatTestData.Encapsulation(), header[(26 + n)..(26 + n + m)]);
+
+        Assert.Equal(
+            DataEncryptionDefaults.KeyConfirmationTagSizeBytes, header[(26 + n + m)..].Length);
+    }
+
+    /// <summary>
+    /// The two length fields hold their <i>own</i> field's length. Distinct lengths make the swap this
+    /// rules out visible: a writer that emitted <c>M</c> where <c>N</c> belongs would still produce a
+    /// self-consistent-looking header.
+    /// </summary>
+    [Fact]
+    public async Task HybridHeader_LengthFieldsAreNotInterchanged()
+    {
+        byte[] wrappedSecret = FormatTestData.Sequence(0x11, 512);
+        byte[] encapsulation = FormatTestData.Sequence(0x99, 1_088);
+
+        using MemoryStream output = new();
+        byte[] header = await HeaderWriter.WriteHybridHeaderAsync(
+            output,
+            Cipher.Aes256Gcm,
+            MLKemParameterSet.MLKem768,
+            FormatTestData.Nonce(),
+            wrappedSecret,
+            encapsulation,
+            FormatTestData.DataKey(),
+            FormatTestData.HmacSha256(),
+            CancellationToken.None);
+
+        // 512 = 00 02 00 00, and 1,088 = 40 04 00 00.
+        Assert.Equal<byte[]>([0x00, 0x02, 0x00, 0x00], header[18..22]);
+        Assert.Equal<byte[]>([0x40, 0x04, 0x00, 0x00], header[534..538]);
+        Assert.Equal(0x02, header[5]); // ML-KEM-768
+    }
+
+    /// <summary>
+    /// The combiner's transcript <c>T</c> is specified as a contiguous header slice — bytes 18 through
+    /// 26 + <c>N</c> + <c>M</c> (<c>docs/format.md</c> §3.5.1). If it were not, the specification would be
+    /// describing something a reader could not locate, so the two are held side by side here.
+    /// </summary>
+    [Fact]
+    public async Task HybridHeader_ContainsTheCombinerTranscriptAsAContiguousSlice()
+    {
+        byte[] header = await FormatTestData.BuildHeaderAsync(HeaderShape.Hybrid);
+        byte[] transcript = HybridKeyCombiner.BuildTranscript(
+            FormatTestData.WrappedKey(), FormatTestData.Encapsulation());
+
+        int tagOffset = header.Length - DataEncryptionDefaults.KeyConfirmationTagSizeBytes;
+
+        Assert.Equal(transcript, header[18..tagOffset]);
+    }
+
     /// <summary>
     /// The tag closes every header, so the last 16 bytes are the tag over everything before them.
     /// </summary>
+    /// <summary>Every header shape.</summary>
+    /// <returns>The theory data.</returns>
+    public static TheoryData<HeaderShape> Shapes() => [.. FormatTestData.AllShapes];
+
     [Theory]
-    [InlineData(HeaderShape.Pbkdf2)]
-    [InlineData(HeaderShape.Argon2)]
-    [InlineData(HeaderShape.Rsa)]
-    [InlineData(HeaderShape.MLKem)]
+    [MemberData(nameof(Shapes))]
     public async Task TheLast16Bytes_AreTheKeyConfirmationTagOverEverythingBefore(HeaderShape shape)
     {
         byte[] header = await FormatTestData.BuildHeaderAsync(shape);

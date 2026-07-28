@@ -43,15 +43,16 @@ public sealed record EncryptedDataHeader
 
     /// <summary>
     /// The total header length in bytes — equivalently, the <b>offset of the first payload byte</b>.
-    /// 53 for PBKDF2, 61 for Argon2, 37 + <see cref="WrappedKeyLength"/> for RSA, and
-    /// 38 + <see cref="EncapsulationLength"/> for ML-KEM.
+    /// 53 for PBKDF2, 61 for Argon2, 37 + <see cref="WrappedKeyLength"/> for RSA,
+    /// 38 + <see cref="EncapsulationLength"/> for ML-KEM, and
+    /// 42 + <see cref="WrappedKeyLength"/> + <see cref="EncapsulationLength"/> for the hybrid.
     /// </summary>
     public required int HeaderLength { get; init; }
 
     /// <summary>
-    /// The ML-KEM parameter set the container was encapsulated under. Populated only when
-    /// <see cref="Method"/> is <see cref="EncryptionMethod.MLKem"/>; otherwise
-    /// <see langword="null"/>.
+    /// The ML-KEM parameter set the container was encapsulated under. Populated when
+    /// <see cref="Method"/> is <see cref="EncryptionMethod.MLKem"/> or
+    /// <see cref="EncryptionMethod.Hybrid"/>; otherwise <see langword="null"/>.
     /// </summary>
     public MLKemParameterSet? MLKemParameterSet { get; init; }
 
@@ -83,16 +84,21 @@ public sealed record EncryptedDataHeader
     public int? Argon2DegreeOfParallelism { get; init; }
 
     /// <summary>
-    /// The length in bytes of the RSAES-OAEP-wrapped data key. Populated only when
-    /// <see cref="Method"/> is <see cref="EncryptionMethod.Rsa"/>; otherwise <see langword="null"/>.
-    /// Equals the RSA modulus size in bytes.
+    /// The length in bytes of the RSAES-OAEP ciphertext, which equals the RSA modulus size in bytes.
+    /// Populated when <see cref="Method"/> is <see cref="EncryptionMethod.Rsa"/> or
+    /// <see cref="EncryptionMethod.Hybrid"/>; otherwise <see langword="null"/>.
     /// </summary>
+    /// <remarks>
+    /// What the ciphertext <i>carries</i> differs between the two: for <see cref="EncryptionMethod.Rsa"/>
+    /// it is the data key, and for <see cref="EncryptionMethod.Hybrid"/> it is one of the two secrets the
+    /// data key is combined from. The length means the same thing either way.
+    /// </remarks>
     public int? WrappedKeyLength { get; init; }
 
     /// <summary>
-    /// The length in bytes of the ML-KEM encapsulation (ciphertext). Populated only when
-    /// <see cref="Method"/> is <see cref="EncryptionMethod.MLKem"/>; otherwise
-    /// <see langword="null"/>.
+    /// The length in bytes of the ML-KEM encapsulation (ciphertext). Populated when
+    /// <see cref="Method"/> is <see cref="EncryptionMethod.MLKem"/> or
+    /// <see cref="EncryptionMethod.Hybrid"/>; otherwise <see langword="null"/>.
     /// </summary>
     public int? EncapsulationLength { get; init; }
 }

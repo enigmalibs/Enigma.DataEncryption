@@ -5,15 +5,17 @@
 
 Enigma.DataEncryption encrypts arbitrary data and streams into a **self-describing binary container** — a
 header carrying everything a reader needs to decrypt, followed by an AEAD payload. The whole surface follows
-one idiom: pick the service that matches your credential — a password, an RSA key pair, or a post-quantum
-ML-KEM key pair — then hand it an input stream, an output stream and that credential. Each service derives
-or transports a 32-byte data key and encrypts the payload with a 256-bit cipher in GCM mode, writing the
+one idiom: pick the service that matches your credential — a password, an RSA key pair, a post-quantum
+ML-KEM key pair, or both key pairs together — then hand it an input stream, an output stream and that
+credential. Each service derives, transports or combines a 32-byte data key and encrypts the payload with a
+256-bit cipher in GCM mode, writing the
 salt, costs and cipher choice into the header, so decryption needs nothing but the container and the
 credential. It is built on [Enigma.Core](https://www.nuget.org/packages/Enigma.Core), which supplies every
 cryptographic primitive; BouncyCastle backs Enigma.Core but never appears on this library's public surface.
 
-> **What's new in 1.0** — first release: four credential types including post-quantum ML-KEM, over one
-> authenticated, key-committing container format. See [RELEASENOTES.md](RELEASENOTES.md).
+> **What's new in 1.0** — first release: five credential types including post-quantum ML-KEM and a true
+> RSA + ML-KEM hybrid, over one authenticated, key-committing container format. See
+> [RELEASENOTES.md](RELEASENOTES.md).
 
 ## Features
 
@@ -24,6 +26,10 @@ cryptographic primitive; BouncyCastle backs Enigma.Core but never appears on thi
   PEM-encoded keys directly, including password-protected private-key PEMs.
 - **Post-quantum ML-KEM encryption** — `IMLKemDataEncryptionService` establishes the data key by ML-KEM key
   encapsulation (FIPS 203) at parameter set 512, 768 or 1024.
+- **True RSA + ML-KEM hybrid** — `IHybridDataEncryptionService` transports a secret under **each** primitive
+  and combines both into the data key with a split-key PRF, so a container stays secure as long as *either*
+  primitive holds. Breaking RSA with a quantum computer is not enough, and neither is a classical break of
+  ML-KEM. Both private keys are required to decrypt.
 - **Four AEAD ciphers** — AES-256, Twofish-256, Serpent-256 and Camellia-256, each in GCM mode, chosen per
   call through the `Cipher` enum.
 - **An authenticated header** — the **complete header is passed as GCM associated data**, so editing any
@@ -35,16 +41,16 @@ cryptographic primitive; BouncyCastle backs Enigma.Core but never appears on thi
   capped by the reader, not dictated by whoever wrote it. Pass stricter limits to any decrypt call.
 - **Header inspection without decryption** — `IEncryptedDataInspector` returns a parsed
   `EncryptedDataHeader` with no credential at all, for detect-then-dispatch and for gating on cost.
-- **File-path helpers** — twelve `DataEncryptionFileExtensions` wrappers over the four methods, which open
+- **File-path helpers** — fourteen `DataEncryptionFileExtensions` wrappers over the five methods, which open
   asynchronous `FileStream`s, create or overwrite the output, and delete a partial output on any failure.
-- **Dependency injection in one call** — `AddEnigmaDataEncryption()` registers all five services as
+- **Dependency injection in one call** — `AddEnigmaDataEncryption()` registers all six services as
   singletons via `TryAdd`, so any registration can be overridden.
 
 ### Asynchronous, cancellable, observable
 
 Every operation is `async` and takes an optional `IProgress<int>` reporting payload bytes processed, plus a
 `CancellationToken`. Nothing is buffered whole: encrypting a multi-gigabyte file costs the same memory as
-encrypting a short string. All five services are stateless and safe for concurrent use, so one instance can
+encrypting a short string. All six services are stateless and safe for concurrent use, so one instance can
 be shared across an application.
 
 ## Installation
@@ -86,8 +92,8 @@ Console.WriteLine(Encoding.UTF8.GetString(recovered.ToArray()));  // Attack at d
 
 Per-category guides — each with the supported operations, the key types, and copy-pasteable C# samples
 verified against the public API — live under `docs/guides/` in the repository, indexed by
-`docs/guides/README.md`. They cover password-based encryption, RSA, ML-KEM, header inspection, file
-operations, and dependency injection. The normative specification of the container format — every offset,
+`docs/guides/README.md`. They cover password-based encryption, RSA, ML-KEM, the RSA + ML-KEM hybrid, header
+inspection, file operations, and dependency injection. The normative specification of the container format — every offset,
 size and constant, the header-authentication rule, the key-confirmation construction, the limits and the
 error mapping — is `docs/format.md`, also in the repository.
 

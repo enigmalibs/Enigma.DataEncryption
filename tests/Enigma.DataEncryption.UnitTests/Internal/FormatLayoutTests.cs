@@ -27,12 +27,13 @@ public sealed class FormatLayoutTests
     public void TheCommonPrefixIsFiveBytes() => Assert.Equal(5, FormatLayout.CommonPrefixLength);
 
     [Fact]
-    public void TheFourHeaderLengthsMatchTheSpecification()
+    public void TheFiveHeaderLengthsMatchTheSpecification()
     {
         Assert.Equal(53, FormatLayout.Pbkdf2HeaderLength);
         Assert.Equal(61, FormatLayout.Argon2HeaderLength);
         Assert.Equal(37, FormatLayout.RsaHeaderBaseLength);
         Assert.Equal(38, FormatLayout.MLKemHeaderBaseLength);
+        Assert.Equal(42, FormatLayout.HybridHeaderBaseLength);
     }
 
     /// <summary>A written header must be exactly as long as the layout says.</summary>
@@ -54,6 +55,12 @@ public sealed class FormatLayoutTests
             38 + FormatTestData.MLKemEncapsulationLength,
             (await FormatTestData.BuildHeaderAsync(HeaderShape.MLKem)).Length);
 
+    [Fact]
+    public async Task AHybridHeaderIs42PlusBothVariableLengths() =>
+        Assert.Equal(
+            42 + FormatTestData.RsaWrappedKeyLength + FormatTestData.MLKemEncapsulationLength,
+            (await FormatTestData.BuildHeaderAsync(HeaderShape.Hybrid)).Length);
+
     /// <summary>
     /// The ML-KEM header is one byte longer than the RSA header for the same variable-length payload —
     /// the parameter-set byte — which is the only structural difference between the two shapes' fixed
@@ -62,4 +69,28 @@ public sealed class FormatLayoutTests
     [Fact]
     public void TheMLKemBaseIsOneByteLongerThanTheRsaBase() =>
         Assert.Equal(FormatLayout.RsaHeaderBaseLength + 1, FormatLayout.MLKemHeaderBaseLength);
+
+    /// <summary>
+    /// The hybrid base is four bytes longer than the ML-KEM base, and the four bytes are the second
+    /// length field: the hybrid is the only shape carrying two variable-length fields, and therefore two
+    /// lengths.
+    /// </summary>
+    [Fact]
+    public void TheHybridBaseIsOneInt32LongerThanTheMLKemBase() =>
+        Assert.Equal(
+            FormatLayout.MLKemHeaderBaseLength + FormatLayout.Int32Length,
+            FormatLayout.HybridHeaderBaseLength);
+
+    /// <summary>
+    /// The combiner transcript is defined as a header slice (<c>docs/format.md</c> §3.5.1), so the offset
+    /// it starts at — the first length field, at 18 — must be where the layout puts it, and the second
+    /// length field must follow the first value.
+    /// </summary>
+    [Fact]
+    public void TheHybridLengthFieldOffsetsAreWhereTheSpecificationPutsThem()
+    {
+        Assert.Equal(18, FormatLayout.HybridWrappedSecretLengthOffset);
+        Assert.Equal(278, FormatLayout.HybridEncapsulationLengthOffset(256));
+        Assert.Equal(534, FormatLayout.HybridEncapsulationLengthOffset(512));
+    }
 }

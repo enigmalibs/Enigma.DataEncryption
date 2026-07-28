@@ -37,6 +37,7 @@ public sealed class ServiceCollectionExtensionsTests
     [InlineData(typeof(IArgon2DataEncryptionService))]
     [InlineData(typeof(IRsaDataEncryptionService))]
     [InlineData(typeof(IMLKemDataEncryptionService))]
+    [InlineData(typeof(IHybridDataEncryptionService))]
     [InlineData(typeof(IEncryptedDataInspector))]
     public void AddEnigmaDataEncryption_ResolvesEveryService(Type serviceType)
     {
@@ -64,6 +65,7 @@ public sealed class ServiceCollectionExtensionsTests
     [InlineData(typeof(IArgon2DataEncryptionService))]
     [InlineData(typeof(IRsaDataEncryptionService))]
     [InlineData(typeof(IMLKemDataEncryptionService))]
+    [InlineData(typeof(IHybridDataEncryptionService))]
     [InlineData(typeof(IEncryptedDataInspector))]
     public void AddEnigmaDataEncryption_RegistersServicesAsSingletons(Type serviceType)
     {
@@ -158,6 +160,7 @@ public sealed class ServiceCollectionExtensionsTests
         var argon2 = provider.GetRequiredService<IArgon2DataEncryptionService>();
         var rsa = provider.GetRequiredService<IRsaDataEncryptionService>();
         var kem = provider.GetRequiredService<IMLKemDataEncryptionService>();
+        var hybrid = provider.GetRequiredService<IHybridDataEncryptionService>();
         var inspector = provider.GetRequiredService<IEncryptedDataInspector>();
 
         CancellationToken token = TestContext.Current.CancellationToken;
@@ -185,6 +188,18 @@ public sealed class ServiceCollectionExtensionsTests
                 i, o, Cipher.Camellia256Gcm, MLKemTestData.GoldenPublicKey("512"),
                 MLKemParameterSet.MLKem512, null, token),
             (i, o) => kem.DecryptAsync(i, o, MLKemTestData.GoldenPrivateKey("512"), null, null, token));
+
+        // The hybrid takes four Enigma.Core factories rather than three, so its registration lambda is the
+        // one most likely to be missing a dependency — a round-trip through the resolved instance is what
+        // catches that.
+        await AssertRoundTripAsync(
+            EncryptionMethod.Hybrid,
+            (i, o) => hybrid.EncryptAsync(
+                i, o, Cipher.Aes256Gcm, RsaTestData.GoldenPublicKeyPem(),
+                MLKemTestData.GoldenPublicKey("512"), MLKemParameterSet.MLKem512, null, token),
+            (i, o) => hybrid.DecryptAsync(
+                i, o, RsaTestData.GoldenPrivateKeyPem(), MLKemTestData.GoldenPrivateKey("512"), null, null,
+                null, token));
 
         async Task AssertRoundTripAsync(
             EncryptionMethod expectedMethod,

@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using Enigma.Core.Asymmetric.Pqc;
+using Enigma.DataEncryption.UnitTests.Internal;
 using Xunit;
 
 namespace Enigma.DataEncryption.UnitTests.Services;
@@ -14,8 +15,8 @@ namespace Enigma.DataEncryption.UnitTests.Services;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Why this class exists.</b> Twenty committed binary files accumulated across PHASE02–PHASE04, each
-/// intelligible only from the suite that happens to load it. A year from now, "what is
+/// <b>Why this class exists.</b> Twenty-odd committed binary files accumulated across PHASE02–PHASE04 and
+/// FEATURE-5A30, each intelligible only from the suite that happens to load it. A year from now, "what is
 /// <c>mlkem-512-secret.bin</c> and may I delete it?" needs an answer that does not depend on reading four
 /// test classes. The table below <i>is</i> that answer, and it is executable: every row decrypts its
 /// container with its credential and compares against its expected plaintext, so a description that drifts
@@ -64,9 +65,11 @@ public sealed class GoldenVectorInventoryTests
 
         // --- Method 0x03 — RSA ---------------------------------------------------------------------
         new("rsa-2048-public.pem", FixtureRole.Credential,
-            "The RSA-2048 public key the two rsa-*.bin containers were written for."),
+            "The RSA-2048 public key the two rsa-*.bin containers were written for — and, as the RSA half of "
+            + "the credential pair, the two hybrid-*.bin containers too."),
         new("rsa-2048-private.pem", FixtureRole.Credential,
-            "Its unencrypted private half — the credential that opens them."),
+            "Its unencrypted private half — the credential that opens them. For a hybrid container it opens "
+            + "only the RSA half; mlkem-1024-private.key is needed alongside it."),
         new("rsa-2048-private-encrypted.pem", FixtureRole.Credential,
             "The same private key in a PKCS#8 encrypted PEM, protected by "
             + "'enigma-test-pem-passphrase'. Exercises the keyPassword path, and — with a wrong passphrase — "
@@ -93,9 +96,11 @@ public sealed class GoldenVectorInventoryTests
             "ML-KEM-512 (parameter-set byte 0x01) · AES-256-GCM · nonce 00–0B · 768-byte encapsulation.",
             ContainerMethodKind.MLKem, MLKemParameterSet.MLKem512, "512"),
         new("mlkem-1024-public.key", FixtureRole.Credential,
-            "The raw FIPS 203 ML-KEM-1024 encapsulation key for the two mlkem-1024-*.bin containers."),
+            "The raw FIPS 203 ML-KEM-1024 encapsulation key for the two mlkem-1024-*.bin containers — and, as "
+            + "the ML-KEM half of the credential pair, the two hybrid-*.bin containers too."),
         new("mlkem-1024-private.key", FixtureRole.Credential,
-            "Its raw expanded decapsulation key."),
+            "Its raw expanded decapsulation key. For a hybrid container it opens only the ML-KEM half; "
+            + "rsa-2048-private.pem is needed alongside it."),
         new("mlkem-1024-secret.bin", FixtureRole.SharedSecret,
             "The 32-byte shared secret the ML-KEM-1024 golden encapsulation yields."),
         new("mlkem-1024-aes.bin", FixtureRole.Container,
@@ -105,6 +110,24 @@ public sealed class GoldenVectorInventoryTests
         new("mlkem-1024-twofish.bin", FixtureRole.Container,
             "The same inputs under Twofish-256-GCM — a regression vector for the payload.",
             ContainerMethodKind.MLKem, MLKemParameterSet.MLKem1024, "1024"),
+
+        // --- Method 0x05 — hybrid RSA + ML-KEM -----------------------------------------------------
+        new("hybrid-kem-secret.bin", FixtureRole.SharedSecret,
+            "The 32-byte ML-KEM shared secret that BOTH hybrid-*.bin containers' encapsulation yields — they "
+            + "share one wrapped secret and one encapsulation, differing only in cipher byte, tag and "
+            + "payload. It is one of the two inputs to the §3.5.1 key combiner; the other is the RSA half's "
+            + "00–1F. Pins the KEM, which the write path cannot."),
+        new("hybrid-aes.bin", FixtureRole.Container,
+            "Hybrid RSA-2048 + ML-KEM-1024 (parameter-set byte 0x03) · AES-256-GCM · nonce 00–0B · RSA-half "
+            + "secret 00–1F wrapped under rsa-2048-public.pem with RSAES-OAEP-SHA256 · 1,568-byte "
+            + "encapsulation against mlkem-1024-public.key. The data key is combined from both secrets per "
+            + "§3.5.1. Both ciphertexts are randomized and cannot be pinned; every other byte is asserted "
+            + "exactly. Needs BOTH private keys to open.",
+            ContainerMethodKind.Hybrid, MLKemParameterSet.MLKem1024, "1024"),
+        new("hybrid-twofish.bin", FixtureRole.Container,
+            "The same inputs and the same two ciphertexts under Twofish-256-GCM — a regression vector for "
+            + "the payload, independent for the header.",
+            ContainerMethodKind.Hybrid, MLKemParameterSet.MLKem1024, "1024"),
     ];
 
     /// <summary>The container fixtures alone, as theory data.</summary>
@@ -170,6 +193,10 @@ public sealed class GoldenVectorInventoryTests
                 PasswordServiceAdapter.Create(PasswordMethod.Argon2), container),
             ContainerMethodKind.Rsa => await RsaTestData.DecryptToBytesAsync(
                 RsaTestData.GoldenPrivateKeyPem(), container),
+            ContainerMethodKind.Hybrid => await HybridTestData.DecryptToBytesAsync(
+                HybridTestData.GoldenRsaPrivateKeyPem(),
+                HybridTestData.GoldenMLKemPrivateKey(record.KeySlug!),
+                container),
             _ => await MLKemTestData.DecryptToBytesAsync(
                 MLKemTestData.GoldenPrivateKey(record.KeySlug!), container),
         };
@@ -226,6 +253,33 @@ public sealed class GoldenVectorInventoryTests
             encapsulation, MLKemTestData.GoldenPrivateKey(slug), parameterSet);
 
         Assert.Equal(MLKemTestData.GoldenSecret(slug), secret);
+    }
+
+    /// <summary>
+    /// The same cross-check for the hybrid's committed KEM secret — against <b>both</b> hybrid containers,
+    /// since the inventory claims they share one encapsulation. The hybrid's encapsulation sits at a
+    /// different offset from method <c>0x04</c>'s, because a length field and the RSA ciphertext precede it.
+    /// </summary>
+    [Theory]
+    [InlineData("hybrid-aes.bin")]
+    [InlineData("hybrid-twofish.bin")]
+    public void TheCommittedHybridKemSecretMatchesBothHybridEncapsulations(string containerFileName)
+    {
+        byte[] container = ContainerFixtures.Read(containerFileName);
+        byte[] encapsulation = HybridTestData.EncapsulationOf(
+            container, MLKemTestData.EncapsulationLength1024);
+
+        Assert.Equal(
+            HybridTestData.GoldenKemSecret(),
+            HybridTestData.Decapsulate(
+                encapsulation, HybridTestData.GoldenMLKemPrivateKey("1024"),
+                MLKemParameterSet.MLKem1024));
+
+        // And the RSA half carries the documented 00–1F.
+        Assert.Equal(
+            FormatTestData.DataKey(),
+            HybridTestData.UnwrapOaep(
+                HybridTestData.WrappedSecretOf(container), HybridTestData.GoldenRsaPrivateKeyPem()));
     }
 
     /// <summary>

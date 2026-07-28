@@ -15,13 +15,13 @@ using Xunit;
 namespace Enigma.DataEncryption.UnitTests.Services;
 
 /// <summary>
-/// Drives <b>one instance</b> of each of the five services from many tasks at once, on distinct payloads,
+/// Drives <b>one instance</b> of each of the six services from many tasks at once, on distinct payloads,
 /// and checks every result.
 /// </summary>
 /// <remarks>
 /// <para>
 /// This is what substantiates the singleton registration. <c>AddEnigmaDataEncryption()</c> registers all
-/// five as singletons on the stated grounds that they are stateless — every key, nonce and buffer lives on
+/// six as singletons on the stated grounds that they are stateless — every key, nonce and buffer lives on
 /// the stack of the call — and a claim of that kind is worth more as a test than as a comment. The failure
 /// it would catch is a field promoted from local to instance during some later refactor: correct under a
 /// single caller, silently wrong under two.
@@ -38,7 +38,7 @@ public sealed class ServiceThreadSafetyTests
     /// <summary>How many tasks share the one instance.</summary>
     private const int Concurrency = 32;
 
-    /// <summary>The four methods.</summary>
+    /// <summary>The five methods.</summary>
     /// <returns>The theory data.</returns>
     public static TheoryData<ContainerMethodKind> Methods() => [.. ContainerMethodHarness.All];
 
@@ -123,7 +123,7 @@ public sealed class ServiceThreadSafetyTests
     }
 
     /// <summary>
-    /// The fifth service. The inspector has no dependencies and no credential, so the only state it could
+    /// The sixth service. The inspector has no dependencies and no credential, so the only state it could
     /// share is the header buffer itself — which is exactly what would corrupt a concurrent parse.
     /// </summary>
     [Fact]
@@ -132,15 +132,12 @@ public sealed class ServiceThreadSafetyTests
         IEncryptedDataInspector inspector = new EncryptedDataInspector();
         CancellationToken token = TestContext.Current.CancellationToken;
 
-        byte[][] headers =
-        [
-            await FormatTestData.BuildHeaderAsync(HeaderShape.Pbkdf2),
-            await FormatTestData.BuildHeaderAsync(HeaderShape.Argon2),
-            await FormatTestData.BuildHeaderAsync(HeaderShape.Rsa),
-            await FormatTestData.BuildHeaderAsync(HeaderShape.MLKem),
-        ];
-
-        HeaderShape[] shapes = [HeaderShape.Pbkdf2, HeaderShape.Argon2, HeaderShape.Rsa, HeaderShape.MLKem];
+        HeaderShape[] shapes = FormatTestData.AllShapes;
+        byte[][] headers = new byte[shapes.Length][];
+        for (int i = 0; i < shapes.Length; i++)
+        {
+            headers[i] = await FormatTestData.BuildHeaderAsync(shapes[i]);
+        }
 
         Task[] tasks = Enumerable.Range(0, Concurrency).Select(index => Task.Run(async () =>
         {
@@ -158,11 +155,11 @@ public sealed class ServiceThreadSafetyTests
 
     /// <summary>
     /// The concrete singletons, resolved exactly as a container would build them, driven concurrently
-    /// across <i>all</i> five at once — so the interleaving is between different services sharing the same
+    /// across <i>all</i> six at once — so the interleaving is between different services sharing the same
     /// Enigma.Core factories, not just between calls into one.
     /// </summary>
     [Fact]
-    public async Task AllFiveSingletonsWorkConcurrentlyTogether()
+    public async Task AllSixSingletonsWorkConcurrentlyTogether()
     {
         IBlockCipherServiceFactory blockCiphers = new BlockCipherServiceFactory();
         IHmacServiceFactory hmacs = new HmacServiceFactory();
@@ -175,6 +172,8 @@ public sealed class ServiceThreadSafetyTests
             new RsaDataEncryptionService(blockCiphers, new PublicKeyServiceFactory(), hmacs);
         IMLKemDataEncryptionService kem =
             new MLKemDataEncryptionService(blockCiphers, new MLKemServiceFactory(), hmacs);
+        IHybridDataEncryptionService hybrid = new HybridDataEncryptionService(
+            blockCiphers, new PublicKeyServiceFactory(), new MLKemServiceFactory(), hmacs);
         IEncryptedDataInspector inspector = new EncryptedDataInspector();
         CancellationToken token = TestContext.Current.CancellationToken;
 
@@ -183,7 +182,7 @@ public sealed class ServiceThreadSafetyTests
         Task[] tasks = Enumerable.Range(0, Concurrency).Select(index => Task.Run(async () =>
         {
             byte[] plaintext = ContainerFixtures.Plaintext(48 + (index * 13));
-            byte[] container = (index % 4) switch
+            byte[] container = (index % 5) switch
             {
                 0 => await RoundTripAsync(
                     (i, o) => pbkdf2.EncryptAsync(
@@ -203,11 +202,19 @@ public sealed class ServiceThreadSafetyTests
                         i, o, Cipher.Serpent256Gcm, RsaTestData.GoldenPublicKeyPem(), null, token),
                     (i, o) => rsa.DecryptAsync(i, o, RsaTestData.GoldenPrivateKeyPem(), null, null, null, token),
                     plaintext),
-                _ => await RoundTripAsync(
+                3 => await RoundTripAsync(
                     (i, o) => kem.EncryptAsync(
                         i, o, Cipher.Camellia256Gcm, MLKemTestData.GoldenPublicKey("512"),
                         MLKemParameterSet.MLKem512, null, token),
                     (i, o) => kem.DecryptAsync(i, o, MLKemTestData.GoldenPrivateKey("512"), null, null, token),
+                    plaintext),
+                _ => await RoundTripAsync(
+                    (i, o) => hybrid.EncryptAsync(
+                        i, o, Cipher.Aes256Gcm, RsaTestData.GoldenPublicKeyPem(),
+                        MLKemTestData.GoldenPublicKey("512"), MLKemParameterSet.MLKem512, null, token),
+                    (i, o) => hybrid.DecryptAsync(
+                        i, o, RsaTestData.GoldenPrivateKeyPem(), MLKemTestData.GoldenPrivateKey("512"),
+                        null, null, null, token),
                     plaintext),
             };
 
@@ -222,6 +229,7 @@ public sealed class ServiceThreadSafetyTests
         Assert.Contains(EncryptionMethod.Argon2, inspected);
         Assert.Contains(EncryptionMethod.Rsa, inspected);
         Assert.Contains(EncryptionMethod.MLKem, inspected);
+        Assert.Contains(EncryptionMethod.Hybrid, inspected);
     }
 
     /// <summary>

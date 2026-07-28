@@ -4,9 +4,9 @@ The first public release of **Enigma.DataEncryption** — a .NET library that en
 streams into a self-describing binary container: a header carrying everything a reader needs to decrypt,
 followed by an AEAD payload. Every credential type follows one idiom — pick the service that matches your
 credential, hand it an input stream, an output stream and the credential — and every method derives or
-transports a 32-byte data key, then encrypts the payload with a 256-bit block cipher in GCM mode. It is
-built on [Enigma.Core](https://www.nuget.org/packages/Enigma.Core), which supplies every cryptographic
-primitive; BouncyCastle backs Enigma.Core but never appears on this library's public surface.
+transports or combines a 32-byte data key, then encrypts the payload with a 256-bit block cipher in GCM
+mode. It is built on [Enigma.Core](https://www.nuget.org/packages/Enigma.Core), which supplies every
+cryptographic primitive; BouncyCastle backs Enigma.Core but never appears on this library's public surface.
 
 ## Feature overview
 
@@ -23,6 +23,16 @@ primitive; BouncyCastle backs Enigma.Core but never appears on this library's pu
   as the data key directly. FIPS 203 implicit rejection means decapsulation with a wrong key *succeeds*
   and yields a different secret; the header's key-confirmation tag is what turns that into a clean,
   immediate failure.
+- **True RSA + ML-KEM hybrid encryption** — `IHybridDataEncryptionService` is the strongest option the
+  library offers, and the only method taking two credentials. It wraps a random 32-byte secret under the
+  recipient's RSA public key with RSAES-OAEP-SHA256, encapsulates a second secret against their ML-KEM
+  public key, and **combines both** into the data key with a split-key PRF — the XOR of two
+  domain-separated HMAC-SHA256 outputs, one keyed by each secret, over a transcript binding both
+  ciphertexts. If either key is a value the attacker does not hold, the data key is indistinguishable from
+  random, so the container survives a quantum break of RSA *and* a classical break of ML-KEM. Both private
+  keys are required to decrypt, and they fail in different places: a wrong RSA key is caught by the OAEP
+  unwrap, while a wrong ML-KEM key reaches the key-confirmation tag, because implicit rejection lets its
+  decapsulation succeed. `docs/format.md` §3.5.1 specifies the combiner and §3.5.2 states its rationale.
 - **Four AEAD ciphers** — AES-256, Twofish-256, Serpent-256 and Camellia-256, each in GCM mode with a
   12-byte nonce and a 128-bit tag, selected per call through the `Cipher` enum and recorded in the header.
 - **An authenticated, self-describing container** — the **complete header is passed as GCM associated
@@ -39,13 +49,13 @@ primitive; BouncyCastle backs Enigma.Core but never appears on this library's pu
 - **Header inspection without decryption** — `IEncryptedDataInspector` parses a container's header and
   returns an `EncryptedDataHeader` with no credential at all, for the detect-then-dispatch pattern and for
   gating on derivation cost before you commit to paying it.
-- **File-path helpers** — twelve `DataEncryptionFileExtensions` wrappers covering every method, opening
+- **File-path helpers** — fourteen `DataEncryptionFileExtensions` wrappers covering every method, opening
   asynchronous `FileStream`s, creating or overwriting the output, and deleting a partial output on any
   failure including cancellation.
 - **Asynchronous, cancellable, observable** — every operation is `async` and takes an optional
-  `IProgress<int>` (payload bytes processed) and a `CancellationToken`. All five services are stateless
+  `IProgress<int>` (payload bytes processed) and a `CancellationToken`. All six services are stateless
   and safe for concurrent use, so a single instance can be shared across an application.
-- **Dependency injection in one call** — `AddEnigmaDataEncryption()` registers all five services, and the
+- **Dependency injection in one call** — `AddEnigmaDataEncryption()` registers all six services, and the
   Enigma.Core factories they depend on, as singletons using `TryAdd`, so any of them can be overridden.
 
 ## Compatibility

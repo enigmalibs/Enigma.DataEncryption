@@ -124,6 +124,12 @@ switch (header.Method)
     case EncryptionMethod.MLKem:
         Console.WriteLine($"ML-KEM {header.MLKemParameterSet}, {header.EncapsulationLength}-byte encapsulation");
         break;
+    case EncryptionMethod.Hybrid:
+        // The one method that populates both length fields and the parameter set.
+        Console.WriteLine(
+            $"Hybrid: RSA {header.WrappedKeyLength * 8}-bit modulus + ML-KEM {header.MLKemParameterSet}, " +
+            $"{header.EncapsulationLength}-byte encapsulation");
+        break;
 }
 ```
 
@@ -183,6 +189,16 @@ switch (header.Method)
         break;
     }
 
+    case EncryptionMethod.Hybrid:
+    {
+        // Two credentials, both required — see the hybrid guide.
+        string privateKeyPem = File.ReadAllText("recipient.key");
+        byte[] mlKemPrivateKey = File.ReadAllBytes("recipient.mlkem.key.raw");
+        await new HybridDataEncryptionService()
+            .DecryptAsync(container, output, privateKeyPem, mlKemPrivateKey);
+        break;
+    }
+
     default:
         throw new InvalidOperationException($"Unhandled method {header.Method}.");
 }
@@ -195,7 +211,7 @@ static char[] PromptForPassword()
 ```
 
 The `default` arm is unreachable for a container this library parsed — `ReadHeaderAsync` rejects any
-method byte outside the four — but it keeps the switch honest if a future format version adds one.
+method byte outside the five — but it keeps the switch honest if a future format version adds one.
 
 ### Gate on cost before spending it
 

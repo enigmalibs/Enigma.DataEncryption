@@ -55,7 +55,7 @@ The first five bytes are identical in shape across every method.
 | Offset | Size | Field | Values |
 |---|---|---|---|
 | 0 | 2 | Magic | `EC DE` |
-| 2 | 1 | Method | `0x01` PBKDF2 · `0x02` Argon2 · `0x03` RSA · `0x04` ML-KEM · `0x05` **reserved** |
+| 2 | 1 | Method | `0x01` PBKDF2 · `0x02` Argon2 · `0x03` RSA · `0x04` ML-KEM · `0x05` hybrid RSA + ML-KEM |
 | 3 | 1 | Format version | `0x10` = this format · `0x01`–`0x0F` **reserved** |
 | 4 | 1 | Cipher | `0x01` AES-256-GCM · `0x02` Twofish-256-GCM · `0x03` Serpent-256-GCM · `0x04` Camellia-256-GCM |
 
@@ -75,10 +75,11 @@ header is laid out.
 | `0x02` | Argon2 | password |
 | `0x03` | RSA | RSA key pair (PEM) |
 | `0x04` | ML-KEM | ML-KEM key pair (raw FIPS 203 bytes) |
-| `0x05` | **Reserved** — true RSA + ML-KEM hybrid | *(not implemented)* |
+| `0x05` | Hybrid RSA + ML-KEM | **both** — an RSA key pair (PEM) *and* an ML-KEM key pair (raw FIPS 203 bytes) |
 
-`0x05` is reserved, not implemented. Reserving it now costs nothing and avoids a format-version bump
-when the hybrid method lands. A reader of this format version **must reject** `0x05`.
+`0x05` was reserved by earlier revisions of this document and is now assigned (§3.5). Reserving it in
+advance is what let the hybrid method land without a format-version bump. Values `0x06`–`0xFF` are
+unassigned; a reader of this format version **must reject** them.
 
 Each service reads only its own method byte. Handing a PBKDF2 container to the RSA service is a
 format error, not a silent misparse.
@@ -167,7 +168,7 @@ Argon2 version 1.3.
 `N` equals the RSA modulus size in bytes (256 for RSA-2048, 512 for RSA-4096).
 
 There is **no public-key fingerprint field**. OAEP unwrap already fails fast on the wrong key, and
-the key-confirmation tag (§6) covers wrong-credential detection uniformly across all four methods, so
+the key-confirmation tag (§6) covers wrong-credential detection uniformly across every method, so
 a fingerprint would add a correlatable identifier to the container for no detection benefit.
 
 ### 3.4 ML-KEM — method `0x04`
@@ -202,6 +203,113 @@ Note that FIPS 203 **implicit rejection** means decapsulation with a wrong priva
 returning a wrong-but-well-formed shared secret. The key-confirmation tag (§6) is what turns that
 into a clean, fast error.
 
+### 3.5 Hybrid RSA + ML-KEM — method `0x05`
+
+**Header length: 42 + `N` + `M` bytes**, where `N` is the wrapped-secret length and `M` the
+encapsulation length.
+
+| Offset | Size | Field |
+|---|---|---|
+| 0 | 5 | Common prefix (§2), method `0x05` |
+| 5 | 1 | Parameter set — `0x01` ML-KEM-512 · `0x02` ML-KEM-768 · `0x03` ML-KEM-1024 |
+| 6 | 12 | GCM nonce |
+| 18 | 4 | Wrapped-secret length `N` (`Int32` LE) |
+| 22 | `N` | Wrapped RSA secret — **RSAES-OAEP with SHA-256** over a 32-byte random secret |
+| 22 + `N` | 4 | Encapsulation (ciphertext) length `M` (`Int32` LE) |
+| 26 + `N` | `M` | ML-KEM encapsulation |
+| 26 + `N` + `M` | 16 | Key-confirmation tag (§6) |
+| **42 + `N` + `M`** | var | GCM payload |
+
+`N` equals the RSA modulus size in bytes; `M` is fixed by the parameter set, exactly as in §3.4. The
+parameter-set byte is the same wire encoding as §3.4 — 1-based, mapped explicitly, never cast — and it
+occupies the same offset 5, so a hybrid header and an ML-KEM header agree on their first 18 bytes but
+for the method byte.
+
+**Neither field is optional and neither credential is.** A hybrid container is opened by the RSA private
+key *and* the ML-KEM private key together; holding one of the two is worth nothing. That is the entire
+point of the method.
+
+#### 3.5.1 The key combiner
+
+This method is the only one whose data key is neither derived from a credential nor transported whole.
+It is **combined** from two independently transported secrets:
+
+- `rsaSecret` — a 32-byte value drawn from the RNG and wrapped under the recipient's RSA public key with
+  RSAES-OAEP-SHA-256, producing `wrappedRsaSecret` (`N` bytes);
+- `kemSecret` — the 32-byte FIPS 203 shared secret produced by encapsulating against the recipient's
+  ML-KEM public key, alongside `encapsulation` (`M` bytes).
+
+The data key `K` is:
+
+```
+T    = LE32(N) ‖ wrappedRsaSecret ‖ LE32(M) ‖ encapsulation
+
+Krsa = HMAC-SHA256(key: rsaSecret, message: ASCII("Enigma.DataEncryption/hybrid/rsa/v1")   ‖ T)
+Kkem = HMAC-SHA256(key: kemSecret, message: ASCII("Enigma.DataEncryption/hybrid/mlkem/v1") ‖ T)
+
+K    = Krsa XOR Kkem
+```
+
+where:
+
+- `LE32(x)` is the signed 32-bit little-endian encoding of §1.1 — so **`T` is exactly the contiguous
+  header slice from offset 18 up to, but not including, the key-confirmation tag** (bytes 18 through
+  26 + `N` + `M`). It is defined as a header slice on purpose: an implementation can produce it by
+  copying, and a reviewer can locate it in a hex dump.
+- the two labels are US-ASCII, with no trailing NUL. In hex:
+  - `Enigma.DataEncryption/hybrid/rsa/v1` (35 bytes) —
+    `45 6E 69 67 6D 61 2E 44 61 74 61 45 6E 63 72 79 70 74 69 6F 6E 2F 68 79 62 72 69 64 2F 72 73 61 2F 76 31`
+  - `Enigma.DataEncryption/hybrid/mlkem/v1` (37 bytes) —
+    `45 6E 69 67 6D 61 2E 44 61 74 61 45 6E 63 72 79 70 74 69 6F 6E 2F 68 79 62 72 69 64 2F 6D 6C 6B 65 6D 2F 76 31`
+- each secret is the **HMAC key** of its own invocation, never part of a message.
+- `XOR` is bytewise over all 32 bytes. HMAC-SHA256 outputs 32 bytes, which is exactly the data-key
+  size, so there is no truncation and no expansion step.
+
+`K` is then used exactly as every other method's data key: it seals the key-confirmation tag (§6) and
+it is the GCM key for the payload (§5).
+
+#### 3.5.2 Why this combiner
+
+The requirement is one sentence: **the container must stay secure as long as *either* primitive holds.**
+An RSA-only container falls to a sufficiently large quantum computer; an ML-KEM-only container falls to a
+classical break of ML-KEM. A hybrid that is only as strong as its weaker half would be pointless, and a
+careless combiner is exactly that.
+
+**The construction above is a *split-key PRF*: a PRF that is secure if either of its two keys is.** The
+argument is one line in each direction. Suppose `rsaSecret` is a uniformly random 32-byte value the
+adversary does not know. Then `Krsa` is indistinguishable from a uniform 32-byte string, and
+`Krsa XOR Kkem` is too — XOR-ing an adversary-known value into an indistinguishable-from-random value
+leaves it indistinguishable from random. The same argument holds with the roles swapped. So `K` is a good
+key unless **both** secrets are recovered, which is the property asked for. This is the split-key-PRF
+combiner of Giacon–Heuer–Poettering's *KEM Combiners*, instantiated with HMAC-SHA256.
+
+Three details are load-bearing rather than decorative:
+
+- **Neither secret is concatenated into a message.** `HMAC-SHA256(salt, s1 ‖ s2)` — the HKDF-Extract
+  shape — would also be defensible, and it is what TLS 1.3's hybrid key schedule does. It was **not**
+  chosen, because its "secure if either holds" argument needs HMAC to be a PRF when keyed by part of its
+  *message* (the dual-PRF property) rather than by its key. That is a stronger assumption than anything
+  else in this format relies on. Keying each HMAC with its own secret needs only that HMAC-SHA256 is a
+  PRF — the same assumption §6 already makes.
+- **The two labels differ.** They are what stops the degenerate case `rsaSecret == kemSecret`, in which
+  a single shared label would give `Krsa == Kkem` and therefore `K == 0`. That case is not merely a
+  2⁻²⁵⁶ accident: a hostile *sender* can force it, because it encapsulates first, sees `kemSecret`, and
+  then chooses which value to wrap under RSA. With distinct labels the two messages differ, so the two
+  HMAC outputs do not cancel. A container whose data key was all zeros would be readable by anyone
+  holding neither private key.
+- **Both ciphertexts are inside `T`.** `K` is therefore bound to the exact wrapping material that
+  produced it, so neither ciphertext can be swapped, reordered or spliced in from another container
+  without changing `K`. Without that binding, a combiner over the two secrets alone would be malleable
+  in precisely the way KEM-combiner analyses warn about.
+
+**What is *not* claimed.** Plain XOR of the two *secrets*, or their concatenation used directly as a key,
+would not give the property above; neither is what this is. The XOR here is of two PRF outputs, each
+keyed by one secret, over a common transcript — a different construction with a different argument.
+
+**Authentication is not part of the claim either.** As with §3.3 and §3.4, anyone holding the two public
+keys can produce a valid container, so a successful decrypt proves the container was made *for* the
+recipient, not *by* anyone in particular.
+
 ---
 
 ## 4. Fixed parameters
@@ -218,7 +326,9 @@ selectable.**
 | PBKDF2 PRF | HMAC-SHA256 (`Enigma.Core.KeyDerivation.Pbkdf2Prf.HmacSha256`) |
 | Argon2 variant | Argon2id (`Enigma.Core.KeyDerivation.Argon2Variant.Argon2id`) |
 | Argon2 version | 1.3 (`Enigma.Core.KeyDerivation.Argon2Version.Version13`) |
-| RSA key wrapping | RSAES-OAEP, SHA-256 (`Enigma.Core.Asymmetric.PublicKey.RsaOaepHash.Sha256`) |
+| RSA key wrapping (methods `0x03` and `0x05`) | RSAES-OAEP, SHA-256 (`Enigma.Core.Asymmetric.PublicKey.RsaOaepHash.Sha256`) |
+| Hybrid key combiner (method `0x05`) | XOR of two HMAC-SHA256 split-key PRFs (§3.5.1) |
+| Hybrid combiner labels | `Enigma.DataEncryption/hybrid/rsa/v1` and `Enigma.DataEncryption/hybrid/mlkem/v1` |
 | Key-confirmation tag size | 16 bytes |
 | Key-confirmation MAC | HMAC-SHA256, truncated to the leftmost 16 bytes |
 | GCM padding | none (`Enigma.Core.Padding.PaddingScheme.None`) |
@@ -283,7 +393,8 @@ where:
   `45 6E 69 67 6D 61 2E 44 61 74 61 45 6E 63 72 79 70 74 69 6F 6E 2F 6B 63 2F 76 31`
 - `K` is the 32-byte data key, used here as the **HMAC key** (not as the message).
 - `headerBytesBeforeTag` is every header byte from offset 0 up to, but not including, the tag —
-  i.e. the first 37 bytes for PBKDF2, 45 for Argon2, 21 + `N` for RSA, 22 + `N` for ML-KEM.
+  i.e. the first 37 bytes for PBKDF2, 45 for Argon2, 21 + `N` for RSA, 22 + `N` for ML-KEM, and
+  26 + `N` + `M` for the hybrid.
 - `[0..16]` is the **leftmost** 16 bytes of the 32-byte HMAC output.
 
 ### 6.1 Why a separate confirmation key
@@ -300,11 +411,17 @@ touching the payload.
 
 ### 6.3 Consequences
 
-**Uniform fast-fail across all four methods.** A wrong password, a wrong RSA key or a wrong ML-KEM key
-all produce the same clean error at the same point, in time proportional to the header rather than the
-file. For ML-KEM this is the *only* early detection available, because FIPS 203 implicit rejection
-makes decapsulation with a wrong key succeed (§3.4). Without it, a wrong ML-KEM key would surface as a
-GCM authentication failure only after streaming the entire payload.
+**Uniform fast-fail across all five methods.** A wrong password, a wrong RSA key, a wrong ML-KEM key or
+either half of a wrong hybrid credential pair all produce the same clean error at the same point, in time
+proportional to the header rather than the file. For ML-KEM this is the *only* early detection available,
+because FIPS 203 implicit rejection makes decapsulation with a wrong key succeed (§3.4). Without it, a
+wrong ML-KEM key would surface as a GCM authentication failure only after streaming the entire payload.
+
+For the hybrid method (§3.5) the tag does more than fail fast: it is what detects a **wrong secret** as
+opposed to a wrong ciphertext. A wrong RSA private key is caught earlier, by OAEP; a wrong ML-KEM private
+key is not caught at all before the tag, and neither is a sender who wraps one value under RSA while
+combining another. In every one of those cases the two ciphertexts are well-formed and the header parses,
+so the tag over the combined key `K` is the only check that can disagree.
 
 **The construction is key-committing.** Plain GCM is not: it is possible to construct a single
 ciphertext that authenticates correctly under two different keys, decrypting to two different
@@ -326,33 +443,39 @@ iterations or 64 MiB of Argon2id memory per attempt.
 
 1. **Validate arguments** — streams non-null, credential non-null/non-empty, cipher defined, cost
    parameters in range.
-2. **Generate** the salt (16 bytes), the GCM nonce (12 bytes) and — for RSA and ML-KEM — the data key
-   (32 bytes), from `IRandomSource`.
-3. **Derive or obtain `K`**: PBKDF2/Argon2 derive it from the password and salt; RSA wraps a freshly
-   generated `K` under the recipient's public key; ML-KEM encapsulates against the recipient's public
-   key and takes the shared secret as `K`.
+2. **Generate** the salt (16 bytes), the GCM nonce (12 bytes) and — for RSA and the hybrid — the 32-byte
+   secret the RSA wrap transports, from `IRandomSource`. ML-KEM generates no key material of its own.
+3. **Derive, obtain or combine `K`**: PBKDF2/Argon2 derive it from the password and salt; RSA wraps a
+   freshly generated `K` under the recipient's public key; ML-KEM encapsulates against the recipient's
+   public key and takes the shared secret as `K`; the hybrid does **both** — wrap, then encapsulate, then
+   combine the two secrets and the two ciphertexts into `K` per §3.5.1. Both public-key operations
+   precede any write, so a public key the library cannot use leaves the output stream untouched.
 4. **Build the header in memory** — every field except the key-confirmation tag.
 5. **Compute `kcTag`** over those bytes (§6) and **append** it. The header is now complete.
 6. **Write the full header** to the output stream.
 7. **Encrypt the payload**:
    `EncryptAsync(input, output, K, nonce, BlockCipherMode.Gcm, PaddingScheme.None, 128, associatedData: fullHeader, progress, cancellationToken)`.
-8. **Clear `K` and `kcKey`** in a `finally`.
+8. **Clear `K` and `kcKey`** in a `finally` — and, for the hybrid, the two input secrets alongside them.
 
 ### 7.2 Decrypt
 
 1. **Read and validate the common prefix** — magic is `EC DE`; the method byte matches the service
    being used; the version byte is `0x10`; the cipher byte is defined.
-2. **Read the method-body fields**, including the parameter-set byte for ML-KEM.
+2. **Read the method-body fields**, including the parameter-set byte for ML-KEM and the hybrid.
 3. **Validate every cost and length field against `DataEncryptionLimits` (§8) — before any allocation
    or KDF work.** This ordering is the point of the limits: a header claiming 2,000,000,000 Argon2
    iterations must be rejected by arithmetic, not survived by computation.
-4. **Derive or unwrap `K`**: PBKDF2/Argon2 re-derive from the password and the stored salt and costs;
-   RSA unwraps the wrapped key; ML-KEM decapsulates the encapsulation.
+4. **Derive, unwrap or combine `K`**: PBKDF2/Argon2 re-derive from the password and the stored salt and
+   costs; RSA unwraps the wrapped key; ML-KEM decapsulates the encapsulation; the hybrid unwraps **and**
+   decapsulates, then combines per §3.5.1. The hybrid unwraps before it decapsulates, which is why a
+   wrong RSA private key is reported by OAEP while a wrong ML-KEM private key reaches step 5.
 5. **Recompute and verify `kcTag`** with a constant-time comparison (§6.2). On mismatch, fail here —
    no payload byte has been read.
 6. **Decrypt the payload** with the same AAD (the complete header as read):
    `DecryptAsync(input, output, K, nonce, BlockCipherMode.Gcm, PaddingScheme.None, 128, associatedData: fullHeader, progress, cancellationToken)`.
-7. **Clear `K` and `kcKey`** in a `finally`.
+7. **Clear `K` and `kcKey`** in a `finally` — and, for the hybrid, the two recovered secrets alongside
+   them. A wrong ML-KEM key still *produces* a secret (implicit rejection), and a wrong secret is still
+   key material.
 
 Decryption **does not require a seekable input stream**: the header is read forward, once, and the
 payload is streamed from wherever the header ended.
@@ -375,6 +498,13 @@ Every variable cost and length field is bounded. The caps are configurable throu
 
 A field that is `<= 0`, or that exceeds its cap, is a **format error**.
 
+**The hybrid method (§3.5) introduces no cap of its own.** Its two variable-length fields are an RSA
+wrapped secret and an ML-KEM encapsulation — the same two quantities methods `0x03` and `0x04` already
+bound — so the same two caps apply to them, and both are checked before either buffer is allocated.
+Adding a third and fourth cap naming the same quantities would let a reader be configured to accept a
+2 KiB wrapped key from a hybrid container while refusing it from an RSA one, which is not a distinction
+worth being able to express.
+
 **The check happens before any allocation or key-derivation work.** These caps exist so that a
 hostile header cannot turn a decrypt attempt into a denial of service — allocating gigabytes or
 spinning for hours on cost parameters the attacker chose. Reading a bounded integer and comparing it
@@ -395,7 +525,7 @@ The exception a reader raises is part of the contract.
 | Method byte undefined, or does not match the service being used | `DataEncryptionFormatException` |
 | Version byte not `0x10` (includes every reserved legacy value) | `DataEncryptionFormatException` |
 | Cipher byte undefined | `DataEncryptionFormatException` |
-| ML-KEM parameter-set byte undefined | `DataEncryptionFormatException` |
+| ML-KEM parameter-set byte undefined (methods `0x04` and `0x05`) | `DataEncryptionFormatException` |
 | Stream ends inside the header | `DataEncryptionFormatException` |
 | A cost or length field exceeds `DataEncryptionLimits`, or is `<= 0` | `DataEncryptionFormatException` |
 | `Enigma.Core` `ReadLengthValue*` `InvalidOperationException` | translated to `DataEncryptionFormatException` |
@@ -404,10 +534,19 @@ The exception a reader raises is part of the contract.
 | GCM authentication failure (`CryptographicException`) | `DataDecryptionException`, wrapping it |
 | RSA OAEP unwrap failure, **including an undecryptable private-key PEM** (`CryptographicException`) | `DataDecryptionException`, wrapping it |
 | Malformed / unparseable private-key PEM | propagates from Enigma.Core (`ArgumentException` / `FormatException`) — **not** wrapped, since it is a credential-supply error, not a file-content error |
+| Malformed / unusable **public**-key PEM | propagates from Enigma.Core (`ArgumentException` / `FormatException`) — same reasoning, on the way out |
 | ML-KEM decapsulation failure, **including a private key that is malformed or for another parameter set** (`CryptographicException`) | `DataDecryptionException`, wrapping it |
-| ML-KEM encapsulation failure — the caller's public key is malformed or for another parameter set (`CryptographicException`) | `ArgumentException` on `publicKey`, wrapping it |
+| ML-KEM encapsulation failure — the caller's public key is malformed or for another parameter set (`CryptographicException`) | `ArgumentException` on the ML-KEM public-key parameter, wrapping it |
 | Null / empty / out-of-range arguments | `ArgumentNullException` / `ArgumentException` / `ArgumentOutOfRangeException` |
 | Cancellation | `OperationCanceledException` |
+
+**The hybrid method (§3.5) adds no row.** It performs an RSA unwrap and an ML-KEM decapsulation, so it
+inherits both methods' rules verbatim, and they do not conflict: whichever of the two fails first reports
+what that method's row says it reports. The one thing worth stating explicitly is the *order* — the RSA
+unwrap runs first (§7.2 step 4), so when both credentials are wrong it is the RSA row that speaks. Note
+also that only method `0x03`'s wrapped key carries the data key itself; the hybrid's carries one of two
+inputs to §3.5.1 — but the 32-byte length check applies identically, and for the same reason, since a
+sender chooses what it wraps.
 
 > **Why an undecryptable private-key PEM is not separated out.** Enigma.Core reports a wrong RSA private
 > key, an encrypted PEM opened with the wrong passphrase, and an encrypted PEM opened with no passphrase
@@ -446,8 +585,12 @@ it found it, because detecting *that* edit is the AAD's job (§5) and requires a
 
 | Where | Value(s) | Reserved for |
 |---|---|---|
-| Method byte (offset 2) | `0x05` | True RSA + ML-KEM hybrid |
 | Format version (offset 3) | `0x01`–`0x0F` | Legacy `Enigma.Cryptography.DataEncryption` containers |
 
-A conforming reader of format version `0x10` rejects both ranges. They are recorded here so that a
-later implementation does not need a format-version bump to claim them.
+A conforming reader of format version `0x10` rejects that range. It is recorded here so that a later
+implementation does not need a format-version bump to claim it.
+
+Method byte `0x05` **was** reserved here, for the RSA + ML-KEM hybrid, and has since been assigned to it
+(§3.5) — which is the reservation mechanism working exactly as intended: the hybrid landed without a
+format-version bump. Method bytes `0x06`–`0xFF` are unassigned and are rejected, but are not reserved for
+anything in particular.

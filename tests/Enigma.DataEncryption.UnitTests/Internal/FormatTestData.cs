@@ -9,7 +9,7 @@ using Enigma.DataEncryption.Internal;
 namespace Enigma.DataEncryption.UnitTests.Internal;
 
 /// <summary>
-/// The four header shapes of <c>docs/format.md</c> §3, and the fixed inputs the golden vectors are
+/// The five header shapes of <c>docs/format.md</c> §3, and the fixed inputs the golden vectors are
 /// built from.
 /// </summary>
 /// <remarks>
@@ -25,8 +25,19 @@ internal static class FormatTestData
     /// <summary>Encapsulation length used for the ML-KEM shape — ML-KEM-512.</summary>
     internal const int MLKemEncapsulationLength = 768;
 
-    /// <summary>The ML-KEM parameter set the <see cref="HeaderShape.MLKem"/> fixture uses.</summary>
+    /// <summary>
+    /// The ML-KEM parameter set the <see cref="HeaderShape.MLKem"/> and <see cref="HeaderShape.Hybrid"/>
+    /// fixtures use.
+    /// </summary>
     internal const MLKemParameterSet MLKemFixtureParameterSet = MLKemParameterSet.MLKem512;
+
+    /// <summary>
+    /// Every header shape, so a suite that must hold for all of them says so once rather than listing
+    /// them — which is what let method <c>0x05</c> be added without hunting for the lists that had
+    /// enumerated four.
+    /// </summary>
+    internal static HeaderShape[] AllShapes =>
+        [HeaderShape.Pbkdf2, HeaderShape.Argon2, HeaderShape.Rsa, HeaderShape.MLKem, HeaderShape.Hybrid];
 
     /// <summary>The fixed 32-byte data key <c>K</c>: bytes <c>00</c>–<c>1F</c>.</summary>
     internal static byte[] DataKey() => Sequence(0x00, DataEncryptionDefaults.DataKeySizeBytes);
@@ -69,6 +80,8 @@ internal static class FormatTestData
         HeaderShape.Pbkdf2 => FormatLayout.Pbkdf2HeaderLength,
         HeaderShape.Argon2 => FormatLayout.Argon2HeaderLength,
         HeaderShape.Rsa => FormatLayout.RsaHeaderBaseLength + RsaWrappedKeyLength,
+        HeaderShape.Hybrid =>
+            FormatLayout.HybridHeaderBaseLength + RsaWrappedKeyLength + MLKemEncapsulationLength,
         _ => FormatLayout.MLKemHeaderBaseLength + MLKemEncapsulationLength,
     };
 
@@ -80,6 +93,7 @@ internal static class FormatTestData
         HeaderShape.Pbkdf2 => EncryptionMethod.Pbkdf2,
         HeaderShape.Argon2 => EncryptionMethod.Argon2,
         HeaderShape.Rsa => EncryptionMethod.Rsa,
+        HeaderShape.Hybrid => EncryptionMethod.Hybrid,
         _ => EncryptionMethod.MLKem,
     };
 
@@ -125,6 +139,13 @@ internal static class FormatTestData
 
         HeaderShape.Rsa => HeaderWriter.WriteRsaHeaderAsync(
             output, cipher, Nonce(), WrappedKey(), DataKey(), HmacSha256(), CancellationToken.None),
+
+        // The hybrid's DataKey() stands in for the combiner's output, which PHASE01-style header tests do
+        // not need to be real: HeaderWriter takes the combined key as an opaque 32 bytes, and whether it
+        // really is HybridKeyCombiner's output is what HybridGoldenVectorTests pins.
+        HeaderShape.Hybrid => HeaderWriter.WriteHybridHeaderAsync(
+            output, cipher, MLKemFixtureParameterSet, Nonce(), WrappedKey(), Encapsulation(),
+            DataKey(), HmacSha256(), CancellationToken.None),
 
         _ => HeaderWriter.WriteMLKemHeaderAsync(
             output, cipher, MLKemFixtureParameterSet, Nonce(), Encapsulation(),

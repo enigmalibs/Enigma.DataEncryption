@@ -98,6 +98,8 @@ internal static class HeaderReader
                     await ReadRsaBodyAsync(tee, mirror, cipher, limits, cancellationToken).ConfigureAwait(false),
                 EncryptionMethod.MLKem =>
                     await ReadMLKemBodyAsync(tee, mirror, cipher, limits, cancellationToken).ConfigureAwait(false),
+                EncryptionMethod.Hybrid =>
+                    await ReadHybridBodyAsync(tee, mirror, cipher, limits, cancellationToken).ConfigureAwait(false),
                 // Unreachable: MethodFromHeaderByte admits no other value. Kept so that adding a
                 // method to the enum without a body reader is a clean failure rather than a misparse.
                 _ => throw new DataEncryptionFormatException(
@@ -263,6 +265,62 @@ internal static class HeaderReader
         };
     }
 
+    /// <summary>
+    /// Reads a method-<c>0x05</c> body: parameter set, nonce, then <b>two</b> length-value fields.
+    /// </summary>
+    /// <remarks>
+    /// The order is the wrapped RSA secret first, the encapsulation second — the order of
+    /// <c>docs/format.md</c> §3.5, and the order the key combiner's transcript assumes (§3.5.1). Both
+    /// lengths are bounded before their buffers are allocated, and by the same two caps methods
+    /// <c>0x03</c> and <c>0x04</c> use: they are the same two quantities, so §8 gives the hybrid no caps
+    /// of its own.
+    /// </remarks>
+    private static async Task<ParsedHeader> ReadHybridBodyAsync(
+        Stream tee,
+        MemoryStream mirror,
+        Cipher cipher,
+        DataEncryptionLimits limits,
+        CancellationToken cancellationToken)
+    {
+        // As for ML-KEM, the parameter-set byte precedes the nonce — docs/format.md §3.5.
+        MLKemParameterSet parameterSet = MLKemParameterSetWire.FromWireByte(
+            await tee.ReadByteAsync(cancellationToken).ConfigureAwait(false));
+
+        byte[] nonce = await tee.ReadBytesAsync(DataEncryptionDefaults.NonceSizeBytes, cancellationToken)
+            .ConfigureAwait(false);
+
+        byte[] wrappedSecret = await tee.ReadLengthValueAsync(limits.MaxWrappedKeyLength, cancellationToken)
+            .ConfigureAwait(false);
+        LimitsValidator.ValidateWrappedKeyLength(wrappedSecret.Length, limits);
+
+        byte[] encapsulation = await tee.ReadLengthValueAsync(limits.MaxEncapsulationLength, cancellationToken)
+            .ConfigureAwait(false);
+        LimitsValidator.ValidateEncapsulationLength(encapsulation.Length, limits);
+
+        byte[] tag = await ReadKeyConfirmationTagAsync(tee, cancellationToken).ConfigureAwait(false);
+
+        return new ParsedHeader
+        {
+            Header = new EncryptedDataHeader
+            {
+                Method = EncryptionMethod.Hybrid,
+                FormatVersion = DataEncryptionDefaults.FormatVersion,
+                Cipher = cipher,
+                HeaderLength =
+                    FormatLayout.HybridHeaderBaseLength + wrappedSecret.Length + encapsulation.Length,
+                MLKemParameterSet = parameterSet,
+                WrappedKeyLength = wrappedSecret.Length,
+                EncapsulationLength = encapsulation.Length,
+            },
+            HeaderBytes = mirror.ToArray(),
+            Nonce = nonce,
+            WrappedKey = wrappedSecret,
+            Encapsulation = encapsulation,
+            MLKemParameterSet = parameterSet,
+            KeyConfirmationTag = tag,
+        };
+    }
+
     private static Task<byte[]> ReadKeyConfirmationTagAsync(Stream tee, CancellationToken cancellationToken) =>
         tee.ReadBytesAsync(DataEncryptionDefaults.KeyConfirmationTagSizeBytes, cancellationToken);
 
@@ -272,8 +330,7 @@ internal static class HeaderReader
         (byte)EncryptionMethod.Argon2 => EncryptionMethod.Argon2,
         (byte)EncryptionMethod.Rsa => EncryptionMethod.Rsa,
         (byte)EncryptionMethod.MLKem => EncryptionMethod.MLKem,
-        0x05 => throw new DataEncryptionFormatException(
-            "Container method byte 0x05 is reserved for the RSA + ML-KEM hybrid method, which this version does not implement."),
+        (byte)EncryptionMethod.Hybrid => EncryptionMethod.Hybrid,
         _ => throw new DataEncryptionFormatException(
             $"Undefined container method byte 0x{value:X2} at header offset 2."),
     };
