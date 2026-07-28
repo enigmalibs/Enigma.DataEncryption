@@ -1,5 +1,6 @@
 using System;
 using Enigma.Core.Asymmetric.Pqc;
+using Enigma.Core.Asymmetric.PublicKey;
 
 namespace Enigma.DataEncryption.Internal;
 
@@ -64,4 +65,14 @@ internal sealed record ParsedHeader
     /// both the field and its offset.
     /// </summary>
     internal MLKemParameterSet? MLKemParameterSet { get; init; }
+
+    /// <summary>
+    /// The RSA-OAEP hash from header offset 5. Populated for method <c>0x03</c> only — the hybrid's wrap
+    /// is fixed at SHA-256 and carries no such field (<c>docs/format.md</c> §4).
+    /// </summary>
+    /// <remarks>
+    /// This is what the unwrap must use. It comes from the container, never from the caller, which is why
+    /// <c>IRsaDataEncryptionService.DecryptAsync</c> has no hash parameter.
+    /// </remarks>
+    internal RsaOaepHash? RsaOaepHash { get; init; }
 }

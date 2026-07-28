@@ -3,6 +3,7 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Enigma.Core.Asymmetric.Pqc;
+using Enigma.Core.Asymmetric.PublicKey;
 using Enigma.Core.Extensions;
 
 namespace Enigma.DataEncryption.Internal;
@@ -48,8 +49,8 @@ internal static class HeaderReader
     /// <param name="cancellationToken">Token to cancel the read.</param>
     /// <returns>The parsed fields, the raw header bytes, and the method-specific key material.</returns>
     /// <exception cref="DataEncryptionFormatException">
-    /// The magic, method, version, cipher or parameter-set byte is invalid; the stream ends inside the
-    /// header; or a cost or length field is out of bounds.
+    /// The magic, method, version, cipher, OAEP-hash or parameter-set byte is invalid; the stream ends
+    /// inside the header; or a cost or length field is out of bounds.
     /// </exception>
     internal static async Task<ParsedHeader> ReadAsync(
         Stream input,
@@ -190,6 +191,14 @@ internal static class HeaderReader
         };
     }
 
+    /// <summary>
+    /// Reads a method-<c>0x03</c> body: OAEP hash, nonce, then the wrapped key as a length-value field.
+    /// </summary>
+    /// <remarks>
+    /// The OAEP-hash byte precedes the nonce, exactly where ML-KEM puts its parameter set
+    /// (<c>docs/format.md</c> §3.3). It is the header — never the caller — that selects the unwrap, so an
+    /// edited byte does not fail here: it names a hash the wrap did not use, and OAEP reports that.
+    /// </remarks>
     private static async Task<ParsedHeader> ReadRsaBodyAsync(
         Stream tee,
         MemoryStream mirror,
@@ -197,6 +206,9 @@ internal static class HeaderReader
         DataEncryptionLimits limits,
         CancellationToken cancellationToken)
     {
+        RsaOaepHash oaepHash = RsaOaepHashWire.FromWireByte(
+            await tee.ReadByteAsync(cancellationToken).ConfigureAwait(false));
+
         byte[] nonce = await tee.ReadBytesAsync(DataEncryptionDefaults.NonceSizeBytes, cancellationToken)
             .ConfigureAwait(false);
 
@@ -217,11 +229,13 @@ internal static class HeaderReader
                 FormatVersion = DataEncryptionDefaults.FormatVersion,
                 Cipher = cipher,
                 HeaderLength = FormatLayout.RsaHeaderBaseLength + wrappedKey.Length,
+                RsaOaepHash = oaepHash,
                 WrappedKeyLength = wrappedKey.Length,
             },
             HeaderBytes = mirror.ToArray(),
             Nonce = nonce,
             WrappedKey = wrappedKey,
+            RsaOaepHash = oaepHash,
             KeyConfirmationTag = tag,
         };
     }

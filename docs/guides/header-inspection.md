@@ -75,13 +75,19 @@ The rest are method-specific and are `null` when they do not apply:
 | `Argon2Iterations` | `int?` | `Argon2` |
 | `Argon2MemorySizeKb` | `int?` | `Argon2` |
 | `Argon2DegreeOfParallelism` | `int?` | `Argon2` |
-| `WrappedKeyLength` | `int?` | `Rsa` — equals the RSA modulus size in bytes |
-| `EncapsulationLength` | `int?` | `MLKem` |
-| `MLKemParameterSet` | `MLKemParameterSet?` | `MLKem` (the enum is Enigma.Core's, in `Enigma.Core.Asymmetric.Pqc`) |
+| `WrappedKeyLength` | `int?` | `Rsa` or `Hybrid` — equals the RSA modulus size in bytes |
+| `EncapsulationLength` | `int?` | `MLKem` or `Hybrid` |
+| `MLKemParameterSet` | `MLKemParameterSet?` | `MLKem` or `Hybrid` (the enum is Enigma.Core's, in `Enigma.Core.Asymmetric.Pqc`) |
+| `RsaOaepHash` | `RsaOaepHash?` | `Rsa` **only** — the hash backing the OAEP padding that wrapped the data key (the enum is Enigma.Core's, in `Enigma.Core.Asymmetric.PublicKey`) |
 
-`HeaderLength` is 53 for PBKDF2, 61 for Argon2, `37 + WrappedKeyLength` for RSA and
-`38 + EncapsulationLength` for ML-KEM — so it is also how you compute the payload size of a container
-whose total length you know.
+`RsaOaepHash` is `null` for `Hybrid` even though that method also performs an RSA wrap: the hybrid's
+wrapping hash is fixed at SHA-256 by the format, so no container records it. It is never `Sha1` — that
+value's wire byte is reserved and rejected while parsing.
+
+`HeaderLength` is 53 for PBKDF2, 61 for Argon2, `38 + WrappedKeyLength` for RSA,
+`38 + EncapsulationLength` for ML-KEM and
+`42 + WrappedKeyLength + EncapsulationLength` for the hybrid — so it is also how you compute the payload
+size of a container whose total length you know.
 
 The inspector is stateless and safe for concurrent use, so one instance can be shared across an
 application; `EncryptedDataInspector` can equally be registered against `IEncryptedDataInspector` in a
@@ -119,7 +125,8 @@ switch (header.Method)
             $"{header.Argon2MemorySizeKb} KiB across {header.Argon2DegreeOfParallelism} lanes");
         break;
     case EncryptionMethod.Rsa:
-        Console.WriteLine($"RSA, {header.WrappedKeyLength * 8}-bit modulus");
+        Console.WriteLine(
+            $"RSA, {header.WrappedKeyLength * 8}-bit modulus, OAEP-{header.RsaOaepHash}");
         break;
     case EncryptionMethod.MLKem:
         Console.WriteLine($"ML-KEM {header.MLKemParameterSet}, {header.EncapsulationLength}-byte encapsulation");

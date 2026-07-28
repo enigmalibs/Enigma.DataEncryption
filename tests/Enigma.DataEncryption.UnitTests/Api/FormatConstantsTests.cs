@@ -136,8 +136,8 @@ public sealed class FormatConstantsTests
         // Argon2: prefix + nonce + salt + iterations + parallelism + memory + tag
         Assert.Equal(61, CommonPrefixLength + nonce + salt + (3 * int32) + kcTag);
 
-        // RSA: prefix + nonce + wrapped-key length + tag  (+ N)
-        Assert.Equal(37, CommonPrefixLength + nonce + int32 + kcTag);
+        // RSA: prefix + OAEP hash + nonce + wrapped-key length + tag  (+ N)
+        Assert.Equal(38, CommonPrefixLength + 1 + nonce + int32 + kcTag);
 
         // ML-KEM: prefix + parameter set + nonce + encapsulation length + tag  (+ N)
         Assert.Equal(38, CommonPrefixLength + 1 + nonce + int32 + kcTag);

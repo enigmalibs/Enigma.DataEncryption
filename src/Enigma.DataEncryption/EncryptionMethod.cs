@@ -32,7 +32,8 @@ public enum EncryptionMethod : byte
     Argon2 = 0x02,
 
     /// <summary>
-    /// RSAES-OAEP (SHA-256) key transport under an RSA key pair. Header byte <c>0x03</c>; served by
+    /// RSAES-OAEP key transport under an RSA key pair, with the padding hash selected at encryption time
+    /// and recorded in the header (SHA-256, SHA-384 or SHA-512). Header byte <c>0x03</c>; served by
     /// <see cref="IRsaDataEncryptionService"/>.
     /// </summary>
     Rsa = 0x03,

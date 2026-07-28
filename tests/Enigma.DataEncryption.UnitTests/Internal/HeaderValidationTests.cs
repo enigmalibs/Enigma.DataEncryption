@@ -1,4 +1,5 @@
 using System.Threading.Tasks;
+using Enigma.Core.Asymmetric.PublicKey;
 using Enigma.DataEncryption.Internal;
 using Xunit;
 
@@ -218,6 +219,65 @@ public sealed class HeaderValidationTests
                 FormatTestData.WithByteAt(header, 5, value), EncryptionMethod.MLKem));
     }
 
+    // --- §3.3 RSA OAEP hash ------------------------------------------------------------------------
+
+    /// <summary>
+    /// Method <c>0x03</c>'s selector shares offset 5 with ML-KEM's and is rejected on the same terms:
+    /// <c>0x00</c> because the encoding is 1-based, and everything from <c>0x05</c> up because it is
+    /// undefined.
+    /// </summary>
+    [Theory]
+    [InlineData(0x00)]
+    [InlineData(0x05)]
+    [InlineData(0x06)]
+    [InlineData(0x7F)]
+    [InlineData(0xFF)]
+    public async Task AnUndefinedOaepHashByteIsAFormatError(byte value)
+    {
+        byte[] header = await FormatTestData.BuildHeaderAsync(HeaderShape.Rsa);
+
+        await Assert.ThrowsAsync<DataEncryptionFormatException>(
+            () => FormatTestData.ReadHeaderAsync(
+                FormatTestData.WithByteAt(header, 5, value), EncryptionMethod.Rsa));
+    }
+
+    /// <summary>
+    /// <c>0x01</c> is the one value that is <b>reserved</b> rather than undefined (<c>docs/format.md</c>
+    /// §10), and the message says so — the distinction is what makes a later un-reservation a one-line
+    /// change rather than a re-examination of what readers were told.
+    /// </summary>
+    [Fact]
+    public async Task TheReservedSha1HashByteIsRejectedAsReserved()
+    {
+        byte[] header = await FormatTestData.BuildHeaderAsync(HeaderShape.Rsa);
+
+        DataEncryptionFormatException exception = await Assert.ThrowsAsync<DataEncryptionFormatException>(
+            () => FormatTestData.ReadHeaderAsync(
+                FormatTestData.WithByteAt(header, 5, 0x01), EncryptionMethod.Rsa));
+
+        Assert.Contains("reserved", exception.Message);
+        Assert.Contains("SHA-1", exception.Message);
+    }
+
+    /// <summary>
+    /// The three accepted values parse and are reported as read — the counterpart to the rejections above,
+    /// so the theory is not merely asserting that the reader rejects everything.
+    /// </summary>
+    [Theory]
+    [InlineData(0x02, RsaOaepHash.Sha256)]
+    [InlineData(0x03, RsaOaepHash.Sha384)]
+    [InlineData(0x04, RsaOaepHash.Sha512)]
+    public async Task AnAcceptedOaepHashByteParsesAndIsReported(byte value, RsaOaepHash expected)
+    {
+        byte[] header = await FormatTestData.BuildHeaderAsync(HeaderShape.Rsa);
+
+        ParsedHeader parsed = await FormatTestData.ReadHeaderAsync(
+            FormatTestData.WithByteAt(header, 5, value), EncryptionMethod.Rsa);
+
+        Assert.Equal(expected, parsed.RsaOaepHash);
+        Assert.Equal(expected, parsed.Header.RsaOaepHash);
+    }
+
     // --- §8 Cost and length fields -----------------------------------------------------------------
 
     [Theory]
@@ -322,7 +382,7 @@ public sealed class HeaderValidationTests
 
         await Assert.ThrowsAsync<DataEncryptionFormatException>(
             () => FormatTestData.ReadHeaderAsync(
-                FormatTestData.WithInt32At(header, 17, length), EncryptionMethod.Rsa));
+                FormatTestData.WithInt32At(header, 18, length), EncryptionMethod.Rsa));
     }
 
     [Theory]
@@ -480,7 +540,7 @@ public sealed class HeaderValidationTests
     public async Task AnEnormousWrappedKeyLengthIsRejectedWithoutAllocating()
     {
         byte[] header = await FormatTestData.BuildHeaderAsync(HeaderShape.Rsa);
-        byte[] patched = FormatTestData.WithInt32At(header, 17, int.MaxValue);
+        byte[] patched = FormatTestData.WithInt32At(header, 18, int.MaxValue);
 
         await Assert.ThrowsAsync<DataEncryptionFormatException>(
             () => FormatTestData.ReadHeaderAsync(patched, EncryptionMethod.Rsa));

@@ -70,6 +70,7 @@ public sealed class RsaDataEncryptionService : IRsaDataEncryptionService
         Stream output,
         Cipher cipher,
         string publicKeyPem,
+        RsaOaepHash oaepHash = RsaOaepHash.Sha256,
         IProgress<int>? progress = null,
         CancellationToken cancellationToken = default)
     {
@@ -79,8 +80,9 @@ public sealed class RsaDataEncryptionService : IRsaDataEncryptionService
         if (output is null) throw new ArgumentNullException(nameof(output));
         CipherResolver.ValidateArgument(cipher, nameof(cipher));
         ValidatePem(publicKeyPem, nameof(publicKeyPem));
+        RsaOaepHashWire.ValidateArgument(oaepHash, nameof(oaepHash));
 
-        return EncryptCoreAsync(input, output, cipher, publicKeyPem, progress, cancellationToken);
+        return EncryptCoreAsync(input, output, cipher, publicKeyPem, oaepHash, progress, cancellationToken);
     }
 
     /// <inheritdoc />
@@ -107,13 +109,15 @@ public sealed class RsaDataEncryptionService : IRsaDataEncryptionService
     /// </summary>
     /// <remarks>
     /// The wrap comes before the header is built, and therefore before anything is written: a public key
-    /// Enigma.Core cannot use leaves the output stream untouched.
+    /// Enigma.Core cannot use — including one too small for <paramref name="oaepHash"/> — leaves the
+    /// output stream untouched.
     /// </remarks>
     private async Task EncryptCoreAsync(
         Stream input,
         Stream output,
         Cipher cipher,
         string publicKeyPem,
+        RsaOaepHash oaepHash,
         IProgress<int>? progress,
         CancellationToken cancellationToken)
     {
@@ -128,12 +132,12 @@ public sealed class RsaDataEncryptionService : IRsaDataEncryptionService
             // it, so it never needs to be reproducible from a credential.
             dataKey = _randomSource.GenerateRandomBytes(DataEncryptionDefaults.DataKeySizeBytes);
 
-            byte[] wrappedKey = _publicKeyServiceFactory.CreatePublicKeyService()
-                .EncryptOaep(dataKey, publicKeyPem, RsaOaepHash.Sha256);
+            byte[] wrappedKey = WrapDataKey(dataKey, publicKeyPem, oaepHash);
 
             byte[] header = await HeaderWriter.WriteRsaHeaderAsync(
                 output,
                 cipher,
+                oaepHash,
                 nonce,
                 wrappedKey,
                 dataKey,
@@ -186,7 +190,9 @@ public sealed class RsaDataEncryptionService : IRsaDataEncryptionService
         byte[]? dataKey = null;
         try
         {
-            dataKey = UnwrapDataKey(wrappedKey, privateKeyPem, keyPassword);
+            // Non-null for method 0x03 too: the reader resolves offset 5 or throws. The hash comes from
+            // the container, never from the caller — docs/format.md §3.3.
+            dataKey = UnwrapDataKey(wrappedKey, privateKeyPem, parsed.RsaOaepHash!.Value, keyPassword);
 
             if (!KeyConfirmation.Verify(
                     _hmacServiceFactory.CreateHmacSha256Service(),
@@ -216,18 +222,61 @@ public sealed class RsaDataEncryptionService : IRsaDataEncryptionService
     }
 
     /// <summary>
-    /// Recovers the data key from the header's wrapped key with RSAES-OAEP-SHA256, translating an unwrap
-    /// failure and rejecting anything that is not a 32-byte key.
+    /// Wraps the data key under the recipient's public key with the selected OAEP hash, translating a
+    /// public key Enigma.Core cannot wrap with into an argument error.
+    /// </summary>
+    /// <param name="dataKey">The 32-byte data key to transport.</param>
+    /// <param name="publicKeyPem">The recipient's public key, PEM-encoded.</param>
+    /// <param name="oaepHash">The OAEP padding hash, already validated.</param>
+    /// <returns>The OAEP ciphertext, whose length becomes the header's <c>N</c>.</returns>
+    /// <remarks>
+    /// <para>
+    /// <b>A modulus too small for the hash is the caller's public key being unusable, so it is reported
+    /// that way.</b> RFC 8017 §7.1.1 needs <c>k &gt;= 2·hLen + 34</c> to wrap 32 bytes — 98 bytes for
+    /// SHA-256, 130 for SHA-384, 162 for SHA-512 — and Enigma.Core reports a shortfall as
+    /// <see cref="CryptographicException"/>. This is the encrypt side, where the public key is the only
+    /// thing the caller supplied that the operation can be about, so the failure becomes
+    /// <see cref="ArgumentException"/> on <paramref name="publicKeyPem"/> with the original kept as
+    /// <see cref="Exception.InnerException"/> — matching what <c>docs/format.md</c> §9 already prescribes
+    /// for ML-KEM's <c>Encapsulate</c>.
+    /// </para>
+    /// <para>
+    /// Pre-validating the modulus instead is not available: Enigma.Core exposes no modulus-size accessor,
+    /// and this library parses no PEM of its own (it takes no direct BouncyCastle dependency, and
+    /// <c>netstandard2.0</c> offers no PEM/RSA parser). Translation is the only option.
+    /// </para>
+    /// </remarks>
+    private byte[] WrapDataKey(byte[] dataKey, string publicKeyPem, RsaOaepHash oaepHash)
+    {
+        try
+        {
+            return _publicKeyServiceFactory.CreatePublicKeyService()
+                .EncryptOaep(dataKey, publicKeyPem, oaepHash);
+        }
+        catch (CryptographicException exception)
+        {
+            throw new ArgumentException(
+                $"The RSA public key cannot wrap a {DataEncryptionDefaults.DataKeySizeBytes}-byte data key under OAEP-{oaepHash}. The modulus must be at least 2*hLen + 34 bytes (RFC 8017 §7.1.1): 98 for SHA-256, 130 for SHA-384, 162 for SHA-512.",
+                nameof(publicKeyPem),
+                exception);
+        }
+    }
+
+    /// <summary>
+    /// Recovers the data key from the header's wrapped key with the OAEP hash the header names,
+    /// translating an unwrap failure and rejecting anything that is not a 32-byte key.
     /// </summary>
     /// <param name="wrappedKey">The wrapped key read from the header.</param>
     /// <param name="privateKeyPem">The recipient's private key, PEM-encoded.</param>
+    /// <param name="oaepHash">The OAEP padding hash read from header offset 5.</param>
     /// <param name="keyPassword">The passphrase protecting <paramref name="privateKeyPem"/>, or <see langword="null"/>.</param>
     /// <returns>The 32-byte data key.</returns>
     /// <remarks>
     /// <para>
     /// <b>Every OAEP failure becomes a decryption error, including an undecryptable private-key PEM.</b>
-    /// Enigma.Core reports a wrong private key, a wrongly-passworded PEM and an encrypted PEM with no
-    /// passphrase as the <i>same</i> <see cref="CryptographicException"/> from the <i>same</i> call, so
+    /// Enigma.Core reports a wrong private key, a wrongly-passworded PEM, an encrypted PEM with no
+    /// passphrase and a container whose OAEP-hash byte was edited as the <i>same</i>
+    /// <see cref="CryptographicException"/> from the <i>same</i> call, so
     /// they cannot be told apart without matching on message text. They are therefore all wrapped, with
     /// the original kept as <see cref="Exception.InnerException"/> — which is where the specific cause
     /// remains readable (<c>docs/format.md</c> §9). A PEM that cannot be <i>parsed</i> at all still
@@ -241,18 +290,22 @@ public sealed class RsaDataEncryptionService : IRsaDataEncryptionService
     /// whoever chose the key material can compute a matching tag.
     /// </para>
     /// </remarks>
-    private byte[] UnwrapDataKey(byte[] wrappedKey, string privateKeyPem, char[]? keyPassword)
+    private byte[] UnwrapDataKey(
+        byte[] wrappedKey,
+        string privateKeyPem,
+        RsaOaepHash oaepHash,
+        char[]? keyPassword)
     {
         byte[] dataKey;
         try
         {
             dataKey = _publicKeyServiceFactory.CreatePublicKeyService()
-                .DecryptOaep(wrappedKey, privateKeyPem, RsaOaepHash.Sha256, keyPassword);
+                .DecryptOaep(wrappedKey, privateKeyPem, oaepHash, keyPassword);
         }
         catch (CryptographicException exception)
         {
             throw new DataDecryptionException(
-                "The RSA private key does not open this container: the wrapped data key could not be recovered. The key may not match the container, or an encrypted private-key PEM may have been supplied with the wrong passphrase.",
+                "The RSA private key does not open this container: the wrapped data key could not be recovered. The key may not match the container, an encrypted private-key PEM may have been supplied with the wrong passphrase, or the container's OAEP-hash byte may have been edited.",
                 exception);
         }
 

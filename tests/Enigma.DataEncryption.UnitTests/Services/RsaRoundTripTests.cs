@@ -1,5 +1,7 @@
 using System.IO;
+using System.Security.Cryptography;
 using System.Threading.Tasks;
+using Enigma.Core.Asymmetric.PublicKey;
 using Enigma.DataEncryption.UnitTests.Internal;
 using Xunit;
 
@@ -13,7 +15,8 @@ namespace Enigma.DataEncryption.UnitTests.Services;
 /// <remarks>
 /// The variable-length wrapped key is what makes RSA different from the password methods, so the header
 /// shape is asserted at all three key sizes: <c>N</c> is the modulus size in bytes, and the header is
-/// 37 + <c>N</c> long (<c>docs/format.md</c> §3.3).
+/// 38 + <c>N</c> long (<c>docs/format.md</c> §3.3). <c>N</c> does <b>not</b> depend on the OAEP hash,
+/// which is why the cipher × hash sweep below can assert one length for all three.
 /// </remarks>
 /// <param name="keys">The shared key material.</param>
 [Collection(RsaKeyCollection.Name)]
@@ -27,6 +30,141 @@ public sealed class RsaRoundTripTests(RsaKeyFixture keys)
     /// <returns>The theory data.</returns>
     public static TheoryData<int, int> KeySizes() =>
         new() { { 2048, 256 }, { 3072, 384 }, { 4096, 512 } };
+
+    /// <summary>Every cipher crossed with every accepted OAEP hash — twelve combinations.</summary>
+    /// <returns>The theory data.</returns>
+    public static TheoryData<Cipher, RsaOaepHash> CiphersAndOaepHashes()
+    {
+        TheoryData<Cipher, RsaOaepHash> data = [];
+        foreach (Cipher cipher in RsaTestData.AllCiphers)
+        {
+            foreach (RsaOaepHash oaepHash in RsaTestData.AllOaepHashes)
+            {
+                data.Add(cipher, oaepHash);
+            }
+        }
+
+        return data;
+    }
+
+    /// <summary>The three accepted OAEP hashes, with the wire byte each records at offset 5.</summary>
+    /// <returns>The theory data.</returns>
+    public static TheoryData<RsaOaepHash, byte> OaepHashesAndWireBytes() =>
+        new() { { RsaOaepHash.Sha256, 0x02 }, { RsaOaepHash.Sha384, 0x03 }, { RsaOaepHash.Sha512, 0x04 } };
+
+    // --- The OAEP hash ------------------------------------------------------------------------------
+
+    /// <summary>
+    /// The acceptance criterion: all four ciphers round-trip under all three hashes, and the header is the
+    /// same length either way — the hash changes the padding, not the ciphertext size.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(CiphersAndOaepHashes))]
+    public async Task RoundTripsEveryCipherUnderEveryOaepHash(Cipher cipher, RsaOaepHash oaepHash)
+    {
+        byte[] plaintext = RsaTestData.Plaintext(1_024 + 7);
+
+        byte[] container = await RsaTestData.EncryptToBytesAsync(
+            keys.PublicKeyPem, plaintext, cipher, oaepHash: oaepHash);
+
+        Assert.Equal(RsaTestData.HeaderLength2048 + plaintext.Length + 16, container.Length);
+        Assert.Equal(plaintext, await RsaTestData.DecryptToBytesAsync(keys.PrivateKeyPem, container));
+    }
+
+    /// <summary>
+    /// RSA-3072 too, so the hash and the modulus size are shown to be independent axes rather than a pair
+    /// that happens to work at 2048.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(OaepHashesAndWireBytes))]
+    public async Task RoundTripsAtRsa3072UnderEveryOaepHash(RsaOaepHash oaepHash, byte expectedWireByte)
+    {
+        byte[] plaintext = RsaTestData.Plaintext(300);
+
+        byte[] container = await RsaTestData.EncryptToBytesAsync(
+            keys.PublicKeyPem3072, plaintext, oaepHash: oaepHash);
+
+        Assert.Equal(expectedWireByte, container[RsaTestData.OaepHashOffset]);
+        Assert.Equal(RsaTestData.HeaderLength(384) + plaintext.Length + 16, container.Length);
+        Assert.Equal(plaintext, await RsaTestData.DecryptToBytesAsync(keys.PrivateKeyPem3072, container));
+    }
+
+    /// <summary>The selected hash is what lands at offset 5 (<c>docs/format.md</c> §3.3).</summary>
+    [Theory]
+    [MemberData(nameof(OaepHashesAndWireBytes))]
+    public async Task TheSelectedHashIsRecordedAtOffsetFive(RsaOaepHash oaepHash, byte expectedWireByte)
+    {
+        byte[] container = await RsaTestData.EncryptToBytesAsync(
+            keys.PublicKeyPem, RsaTestData.Plaintext(64), oaepHash: oaepHash);
+
+        Assert.Equal(expectedWireByte, container[RsaTestData.OaepHashOffset]);
+    }
+
+    /// <summary>
+    /// Omitting the parameter selects SHA-256 — the documented default, and the byte a container written by
+    /// a caller who never heard of this field carries.
+    /// </summary>
+    [Fact]
+    public async Task TheDefaultHashIsSha256()
+    {
+        byte[] plaintext = RsaTestData.Plaintext(64);
+        RsaDataEncryptionService service = RsaTestData.Service();
+
+        using MemoryStream input = new(plaintext, writable: false);
+        using MemoryStream output = new();
+        await service.EncryptAsync(
+            input, output, Cipher.Aes256Gcm, keys.PublicKeyPem,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal(0x02, output.ToArray()[RsaTestData.OaepHashOffset]);
+    }
+
+    /// <summary>
+    /// The wrapped key really is OAEP under the hash the header names: unwrapping with that hash recovers
+    /// the data key the confirmation tag was computed under, and the other two hashes do not.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(OaepHashesAndWireBytes))]
+    public async Task TheWrappedKeyUnwrapsOnlyUnderTheRecordedHash(RsaOaepHash oaepHash, byte wireByte)
+    {
+        FixedDataKeyAndNonceSource randomSource = new(FormatTestData.DataKey(), FormatTestData.Nonce());
+
+        byte[] container = await RsaTestData.EncryptToBytesAsync(
+            keys.PublicKeyPem,
+            RsaTestData.Plaintext(16),
+            service: RsaTestData.Service(randomSource),
+            oaepHash: oaepHash);
+
+        byte[] wrappedKey = RsaTestData.WrappedKeyOf(container);
+        Assert.Equal(wireByte, container[RsaTestData.OaepHashOffset]);
+        Assert.Equal(
+            FormatTestData.DataKey(),
+            RsaTestData.UnwrapOaep(wrappedKey, keys.PrivateKeyPem, oaepHash: oaepHash));
+
+        foreach (RsaOaepHash other in RsaTestData.AllOaepHashes)
+        {
+            if (other == oaepHash) continue;
+
+            Assert.ThrowsAny<CryptographicException>(
+                () => RsaTestData.UnwrapOaep(wrappedKey, keys.PrivateKeyPem, oaepHash: other));
+        }
+    }
+
+    /// <summary>
+    /// The header is still the GCM associated data in full, hash byte included: flipping offset 5 on a
+    /// finished container cannot be tolerated by any path.
+    /// </summary>
+    [Fact]
+    public async Task TheHashByteIsCoveredByTheAssociatedData()
+    {
+        byte[] container = await RsaTestData.EncryptToBytesAsync(
+            keys.PublicKeyPem, RsaTestData.Plaintext(128), oaepHash: RsaOaepHash.Sha384);
+
+        byte[] tampered = FormatTestData.WithByteAt(container, RsaTestData.OaepHashOffset, 0x04);
+
+        await Assert.ThrowsAnyAsync<DataEncryptionException>(
+            () => RsaTestData.DecryptToBytesAsync(keys.PrivateKeyPem, tampered));
+    }
 
     [Theory]
     [MemberData(nameof(Ciphers))]
@@ -114,7 +252,8 @@ public sealed class RsaRoundTripTests(RsaKeyFixture keys)
         using PatternStream plaintext = new(size);
         using MemoryStream container = new();
         await service.EncryptAsync(
-            plaintext, container, Cipher.Aes256Gcm, keys.PublicKeyPem, null, TestContext.Current.CancellationToken);
+            plaintext, container, Cipher.Aes256Gcm, keys.PublicKeyPem, RsaOaepHash.Sha256, null,
+            TestContext.Current.CancellationToken);
 
         Assert.Equal(RsaTestData.HeaderLength2048 + size + 16, container.Length);
 
@@ -141,7 +280,8 @@ public sealed class RsaRoundTripTests(RsaKeyFixture keys)
             RsaTestData.HeaderLength2048, () => readWhenFirstPayloadByteWasWritten = plaintext.BytesRead);
 
         await RsaTestData.Service().EncryptAsync(
-            plaintext, container, Cipher.Aes256Gcm, keys.PublicKeyPem, null, TestContext.Current.CancellationToken);
+            plaintext, container, Cipher.Aes256Gcm, keys.PublicKeyPem, RsaOaepHash.Sha256, null,
+            TestContext.Current.CancellationToken);
 
         Assert.True(
             readWhenFirstPayloadByteWasWritten is > 0 and < size,
@@ -178,7 +318,8 @@ public sealed class RsaRoundTripTests(RsaKeyFixture keys)
         using MemoryStream input = new(plaintext, writable: false);
         using MemoryStream container = new();
         await service.EncryptAsync(
-            input, container, Cipher.Aes256Gcm, keys.PublicKeyPem, null, TestContext.Current.CancellationToken);
+            input, container, Cipher.Aes256Gcm, keys.PublicKeyPem, RsaOaepHash.Sha256, null,
+            TestContext.Current.CancellationToken);
 
         // A disposed MemoryStream throws on these; a live one does not.
         Assert.True(input.CanRead);
@@ -209,7 +350,8 @@ public sealed class RsaRoundTripTests(RsaKeyFixture keys)
         using MemoryStream output = new();
         await output.WriteAsync(preamble, 0, preamble.Length, TestContext.Current.CancellationToken);
         await service.EncryptAsync(
-            input, output, Cipher.Aes256Gcm, keys.PublicKeyPem, null, TestContext.Current.CancellationToken);
+            input, output, Cipher.Aes256Gcm, keys.PublicKeyPem, RsaOaepHash.Sha256, null,
+            TestContext.Current.CancellationToken);
 
         byte[] written = output.ToArray();
         Assert.Equal(preamble, written[..4]);
@@ -226,7 +368,7 @@ public sealed class RsaRoundTripTests(RsaKeyFixture keys)
 
     /// <summary>
     /// Progress totals the payload byte count and excludes the header, on both directions. Were the
-    /// 293-byte header counted, the sums below would be larger by exactly that.
+    /// 294-byte header counted, the sums below would be larger by exactly that.
     /// </summary>
     [Fact]
     public async Task ProgressTotalsThePayloadBytesAndExcludesTheHeader()
@@ -239,7 +381,8 @@ public sealed class RsaRoundTripTests(RsaKeyFixture keys)
         using MemoryStream input = new(plaintext, writable: false);
         using MemoryStream container = new();
         await service.EncryptAsync(
-            input, container, Cipher.Aes256Gcm, keys.PublicKeyPem, encryptProgress, TestContext.Current.CancellationToken);
+            input, container, Cipher.Aes256Gcm, keys.PublicKeyPem, RsaOaepHash.Sha256, encryptProgress,
+            TestContext.Current.CancellationToken);
 
         Assert.NotEmpty(encryptProgress.Values);
         Assert.All(encryptProgress.Values, value => Assert.True(value > 0, $"Progress reported {value}."));
@@ -272,7 +415,7 @@ public sealed class RsaRoundTripTests(RsaKeyFixture keys)
         byte[] second = await RsaTestData.EncryptToBytesAsync(keys.PublicKeyPem, plaintext);
 
         Assert.NotEqual(first, second);
-        Assert.NotEqual(first[5..17], second[5..17]);                                        // nonce
+        Assert.NotEqual(first[6..18], second[6..18]);                                        // nonce
         Assert.NotEqual(RsaTestData.WrappedKeyOf(first), RsaTestData.WrappedKeyOf(second));  // wrapped key
     }
 
@@ -285,7 +428,7 @@ public sealed class RsaRoundTripTests(RsaKeyFixture keys)
         byte[] container = await RsaTestData.EncryptToBytesAsync(
             keys.PublicKeyPem, RsaTestData.Plaintext(16), service: RsaTestData.Service(randomSource));
 
-        Assert.Equal(FormatTestData.Nonce(), container[5..17]);
+        Assert.Equal(FormatTestData.Nonce(), container[6..18]);
         Assert.Equal(1, randomSource.Requests[DataEncryptionDefaults.DataKeySizeBytes]);
         Assert.Equal(1, randomSource.Requests[DataEncryptionDefaults.NonceSizeBytes]);
 

@@ -3,6 +3,7 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Enigma.Core.Asymmetric.Pqc;
+using Enigma.Core.Asymmetric.PublicKey;
 using Enigma.DataEncryption.UnitTests.Internal;
 using Xunit;
 
@@ -109,6 +110,45 @@ public sealed class EncryptedDataInspectorTests
         EncryptedDataHeader parsed = await ReadAsync(input);
 
         Assert.Equal(FormatTestData.RsaWrappedKeyLength, parsed.WrappedKeyLength);
+        Assert.Equal(FormatTestData.RsaFixtureOaepHash, parsed.RsaOaepHash);
+    }
+
+    /// <summary>
+    /// The inspector reports the OAEP hash for every accepted value, without a credential — which is the
+    /// point of it being a header field rather than a caller argument (<c>docs/format.md</c> §3.3).
+    /// </summary>
+    [Theory]
+    [InlineData(RsaOaepHash.Sha256)]
+    [InlineData(RsaOaepHash.Sha384)]
+    [InlineData(RsaOaepHash.Sha512)]
+    public async Task TheOaepHashIsReported(RsaOaepHash oaepHash)
+    {
+        byte[] header = await RsaTestData.BuildHeaderAsync(
+            FormatTestData.WrappedKey(), FormatTestData.DataKey(), Cipher.Aes256Gcm, oaepHash);
+        using MemoryStream input = new(header, writable: false);
+
+        EncryptedDataHeader parsed = await ReadAsync(input);
+
+        Assert.Equal(EncryptionMethod.Rsa, parsed.Method);
+        Assert.Equal(oaepHash, parsed.RsaOaepHash);
+    }
+
+    /// <summary>
+    /// An inspector rejects a container whose hash byte is invalid, exactly as it rejects an undefined
+    /// cipher or parameter-set byte — the format half of §9 is all a header-only reader can raise.
+    /// </summary>
+    [Theory]
+    [InlineData(0x00)]
+    [InlineData(0x01)]
+    [InlineData(0x05)]
+    [InlineData(0xFF)]
+    public async Task AnInvalidOaepHashByteIsAFormatError(byte hashByte)
+    {
+        byte[] header = FormatTestData.WithByteAt(
+            await FormatTestData.BuildHeaderAsync(HeaderShape.Rsa), 5, hashByte);
+        using MemoryStream input = new(header, writable: false);
+
+        await Assert.ThrowsAsync<DataEncryptionFormatException>(() => ReadAsync(input));
     }
 
     [Fact]
@@ -155,6 +195,10 @@ public sealed class EncryptedDataInspectorTests
             Assert.Null(parsed.MLKemParameterSet);
             Assert.Null(parsed.EncapsulationLength);
         }
+
+        // The OAEP hash is method 0x03's alone — the hybrid also wraps under OAEP, but at a hash the format
+        // fixes rather than records, so no container carries the field for it (docs/format.md §4).
+        if (shape != HeaderShape.Rsa) Assert.Null(parsed.RsaOaepHash);
     }
 
     /// <summary>
@@ -181,6 +225,7 @@ public sealed class EncryptedDataInspectorTests
 
         Assert.Null(parsed.Pbkdf2Iterations);
         Assert.Null(parsed.Argon2Iterations);
+        Assert.Null(parsed.RsaOaepHash);
     }
 
     // --- Real containers ---------------------------------------------------------------------------
@@ -454,9 +499,9 @@ public sealed class EncryptedDataInspectorTests
     }
 
     /// <summary>
-    /// Every value of the method byte, the version byte and the ML-KEM parameter-set byte that the
-    /// inspector must refuse. It accepts any of the four methods, so only genuinely undefined values are
-    /// swept here.
+    /// Every value of the method byte, the version byte, the cipher byte, the ML-KEM parameter-set byte and
+    /// the RSA OAEP-hash byte that the inspector must refuse. It accepts any of the five methods, so only
+    /// genuinely undefined values are swept here — plus the one *reserved* value, OAEP-SHA-1.
     /// </summary>
     public static TheoryData<HeaderShape, int, byte> UndefinedBytes()
     {
@@ -496,6 +541,16 @@ public sealed class EncryptedDataInspectorTests
             {
                 data.Add(shape, 5, (byte)value);
             }
+        }
+
+        // RSA OAEP-hash byte, at the same offset 5: 0x00, the reserved 0x01, and everything from 0x05 up.
+        // 0x01 is the one value here that is *reserved* rather than undefined, and it is refused all the
+        // same — a reader of format version 0x10 accepts no OAEP-SHA-1 container (§10).
+        data.Add(HeaderShape.Rsa, 5, 0x00);
+        data.Add(HeaderShape.Rsa, 5, 0x01);
+        for (int value = 0x05; value <= 0xFF; value++)
+        {
+            data.Add(HeaderShape.Rsa, 5, (byte)value);
         }
 
         return data;

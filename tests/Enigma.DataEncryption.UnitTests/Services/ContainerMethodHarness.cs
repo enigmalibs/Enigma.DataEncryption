@@ -106,7 +106,7 @@ internal abstract class ContainerMethodHarness
     /// enumerated synchronously at discovery time.
     /// </summary>
     /// <param name="kind">The method.</param>
-    /// <returns>53, 61, 293, 806 or 1,066.</returns>
+    /// <returns>53, 61, 294, 806 or 1,066.</returns>
     internal static int HeaderLengthOf(ContainerMethodKind kind) => kind switch
     {
         ContainerMethodKind.Pbkdf2 => FormatLayout.Pbkdf2HeaderLength,
@@ -412,7 +412,8 @@ internal abstract class ContainerMethodHarness
             IProgress<int>? progress = null,
             CancellationToken cancellationToken = default) =>
             _service.EncryptAsync(
-                input, output, cipher, RsaTestData.GoldenPublicKeyPem(), progress, cancellationToken);
+                input, output, cipher, RsaTestData.GoldenPublicKeyPem(), RsaOaepHash.Sha256, progress,
+                cancellationToken);
 
         internal override Task DecryptAsync(
             Stream input,
@@ -434,7 +435,8 @@ internal abstract class ContainerMethodHarness
             IProgress<int>? progress = null,
             CancellationToken cancellationToken = default) =>
             _service.EncryptFileAsync(
-                inputPath, outputPath, cipher, RsaTestData.GoldenPublicKeyPem(), progress, cancellationToken);
+                inputPath, outputPath, cipher, RsaTestData.GoldenPublicKeyPem(), RsaOaepHash.Sha256, progress,
+                cancellationToken);
 
         internal override Task DecryptFileAsync(
             string inputPath,

@@ -16,8 +16,12 @@ cryptographic primitive; BouncyCastle backs Enigma.Core but never appears on thi
   the cost parameters into the header, so decryption needs nothing but the container and the password.
   Both accept a `byte[]` or a `char[]` password, and clear the key material they derive.
 - **RSA encryption** — `IRsaDataEncryptionService` transports a freshly generated data key under
-  RSAES-OAEP-SHA256, taking PEM-encoded keys directly. Encrypted private-key PEMs are supported through
-  an optional `keyPassword`.
+  RSAES-OAEP, with the padding hash **selectable at encryption time and recorded in the header**:
+  SHA-256 (the default), SHA-384 or SHA-512. SHA-1 is rejected and its wire byte reserved. Because the
+  hash travels in the container, decryption takes no hash argument. Note that a larger hash needs a
+  larger modulus — RFC 8017 requires `2·hLen + 34` bytes, so RSA-1024 is too small for SHA-384 and
+  SHA-512, while RSA-2048 and above accept all three. PEM-encoded keys are taken directly, and encrypted
+  private-key PEMs are supported through an optional `keyPassword`.
 - **Post-quantum ML-KEM encryption** — `IMLKemDataEncryptionService` establishes the data key by ML-KEM
   key encapsulation (FIPS 203) at parameter set 512, 768 or 1024, taking the encapsulated shared secret
   as the data key directly. FIPS 203 implicit rejection means decapsulation with a wrong key *succeeds*
@@ -73,7 +77,8 @@ format changed in ways that are not expressible as a compatible extension:
 - the complete header is now authenticated as AEAD associated data, so every header byte is covered by
   the payload tag;
 - a key-confirmation tag was added to the header, making the construction key-committing;
-- the RSA data key is wrapped with RSAES-OAEP-SHA256;
+- the RSA data key is wrapped with RSAES-OAEP rather than PKCS#1 v1.5, under a padding hash the header
+  records;
 - Argon2's memory cost is recorded in **KiB** rather than bytes.
 
 Each of those changes the bytes on the wire. Rather than risk mis-reading an old file, this release rejects

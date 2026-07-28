@@ -27,15 +27,18 @@ password overload), and two each for RSA, ML-KEM and the hybrid.
 | `IArgon2DataEncryptionService` | `EncryptFileAsync` | `char[] password` |
 | `IArgon2DataEncryptionService` | `DecryptFileAsync` | `byte[] password` |
 | `IArgon2DataEncryptionService` | `DecryptFileAsync` | `char[] password` |
-| `IRsaDataEncryptionService` | `EncryptFileAsync` | `string publicKeyPem` |
+| `IRsaDataEncryptionService` | `EncryptFileAsync` | `string publicKeyPem`, optional `RsaOaepHash oaepHash` |
 | `IRsaDataEncryptionService` | `DecryptFileAsync` | `string privateKeyPem`, optional `char[]? keyPassword` |
 | `IMLKemDataEncryptionService` | `EncryptFileAsync` | `byte[] publicKey`, optional `MLKemParameterSet parameterSet` |
 | `IMLKemDataEncryptionService` | `DecryptFileAsync` | `byte[] privateKey` |
 | `IHybridDataEncryptionService` | `EncryptFileAsync` | `string rsaPublicKeyPem` **and** `byte[] mlKemPublicKey`, optional `MLKemParameterSet parameterSet` |
 | `IHybridDataEncryptionService` | `DecryptFileAsync` | `string rsaPrivateKeyPem` **and** `byte[] mlKemPrivateKey`, optional `char[]? rsaKeyPassword` |
 
-Each carries the same optional parameters as its stream counterpart — the cost parameters on encrypt, the
-`DataEncryptionLimits? limits` on decrypt, and `IProgress<int>? progress` plus `CancellationToken` on both.
+Each carries the same optional parameters as its stream counterpart — the cost parameters and the algorithm
+selectors on encrypt, the `DataEncryptionLimits? limits` on decrypt, and `IProgress<int>? progress` plus
+`CancellationToken` on both. Note that the two selectors recorded in a header — the RSA `oaepHash` and the
+ML-KEM `parameterSet` — appear on `EncryptFileAsync` only: the decrypt side reads them from the container,
+so they are not parameters there.
 
 ### The three semantics
 

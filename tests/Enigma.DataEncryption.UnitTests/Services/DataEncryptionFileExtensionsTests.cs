@@ -4,6 +4,7 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Enigma.Core.Asymmetric.Pqc;
+using Enigma.Core.Asymmetric.PublicKey;
 using Enigma.Core.Hashing.Hmac;
 using Enigma.Core.KeyDerivation;
 using Enigma.Core.Symmetric.BlockCiphers;
@@ -204,6 +205,81 @@ public sealed class DataEncryptionFileExtensionsTests
             cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(plaintext, File.ReadAllBytes(recoveredPath));
+    }
+
+    /// <summary>
+    /// The RSA wrapper honours the OAEP hash it is given, records it in the header, and round-trips through
+    /// a <c>DecryptFileAsync</c> that takes no hash of its own — the hash comes from the file.
+    /// </summary>
+    [Theory]
+    [InlineData(RsaOaepHash.Sha256, 0x02)]
+    [InlineData(RsaOaepHash.Sha384, 0x03)]
+    [InlineData(RsaOaepHash.Sha512, 0x04)]
+    public async Task TheRsaWrapperHonoursTheOaepHash(RsaOaepHash oaepHash, byte expectedWireByte)
+    {
+        IRsaDataEncryptionService service = RsaTestData.Service();
+        byte[] plaintext = ContainerFixtures.Plaintext(200);
+
+        using TempWorkspace workspace = new();
+        string plainPath = workspace.WriteFile("plain.bin", plaintext);
+        string containerPath = workspace.PathFor("container.enc");
+        string recoveredPath = workspace.PathFor("recovered.bin");
+
+        await service.EncryptFileAsync(
+            plainPath, containerPath, Cipher.Aes256Gcm, RsaTestData.GoldenPublicKeyPem(), oaepHash,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal(expectedWireByte, File.ReadAllBytes(containerPath)[RsaTestData.OaepHashOffset]);
+
+        await service.DecryptFileAsync(
+            containerPath, recoveredPath, RsaTestData.GoldenPrivateKeyPem(),
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal(plaintext, File.ReadAllBytes(recoveredPath));
+    }
+
+    /// <summary>
+    /// Omitting the argument selects SHA-256 — so a caller written before the parameter existed keeps
+    /// producing the same containers.
+    /// </summary>
+    [Fact]
+    public async Task TheRsaWrapperDefaultsToSha256()
+    {
+        IRsaDataEncryptionService service = RsaTestData.Service();
+
+        using TempWorkspace workspace = new();
+        string plainPath = workspace.WriteFile("plain.bin", ContainerFixtures.Plaintext(64));
+        string containerPath = workspace.PathFor("container.enc");
+
+        await service.EncryptFileAsync(
+            plainPath, containerPath, Cipher.Aes256Gcm, RsaTestData.GoldenPublicKeyPem(),
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal(0x02, File.ReadAllBytes(containerPath)[RsaTestData.OaepHashOffset]);
+    }
+
+    /// <summary>
+    /// A wrap that fails because the key is too small for the hash still deletes the partial output — the
+    /// cleanup path, reached through an <see cref="ArgumentException"/> raised inside the operation rather
+    /// than by the extension's own validation.
+    /// </summary>
+    [Fact]
+    public async Task ATooSmallKeyLeavesNoOutputFileBehind()
+    {
+        IRsaDataEncryptionService service = RsaTestData.Service();
+        (string publicKeyPem, _) = new PublicKeyServiceFactory().CreatePublicKeyService()
+            .GenerateRsaKeyPair(1024);
+
+        using TempWorkspace workspace = new();
+        string plainPath = workspace.WriteFile("plain.bin", ContainerFixtures.Plaintext(64));
+        string containerPath = workspace.PathFor("container.enc");
+
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => service.EncryptFileAsync(
+                plainPath, containerPath, Cipher.Aes256Gcm, publicKeyPem, RsaOaepHash.Sha512,
+                cancellationToken: TestContext.Current.CancellationToken));
+
+        Assert.False(File.Exists(containerPath), "The partial output file survived a failed wrap.");
     }
 
     /// <summary>The ML-KEM wrapper honours the parameter set it is given, and records it in the header.</summary>

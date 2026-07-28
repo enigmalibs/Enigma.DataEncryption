@@ -103,8 +103,10 @@ authentication tag.
 | `0x03` | Serpent-256-GCM | `IBlockCipherServiceFactory.CreateSerpentService` |
 | `0x04` | Camellia-256-GCM | `IBlockCipherServiceFactory.CreateCamelliaService` |
 
-The cipher is header-selectable because all four choices are equally sound at 256 bits; it is the
-only algorithmic degree of freedom the format offers (see §4).
+The cipher is header-selectable because all four choices are equally sound at 256 bits. It is one of
+only **two** algorithmic degrees of freedom the format offers — the other being method `0x03`'s
+RSA-OAEP hash (§3.3) — and both are selectable for the same reason: within each field, no accepted
+value is a downgrade of another (see §4).
 
 ---
 
@@ -154,18 +156,46 @@ Argon2 version 1.3.
 
 ### 3.3 RSA — method `0x03`
 
-**Header length: 37 + N bytes**, where `N` is the wrapped-key length.
+**Header length: 38 + N bytes**, where `N` is the wrapped-key length.
 
 | Offset | Size | Field |
 |---|---|---|
 | 0 | 5 | Common prefix (§2), method `0x03` |
-| 5 | 12 | GCM nonce |
-| 17 | 4 | Wrapped-key length `N` (`Int32` LE) |
-| 21 | `N` | Wrapped data key — **RSAES-OAEP with SHA-256** over the 32-byte data key |
-| 21 + `N` | 16 | Key-confirmation tag (§6) |
-| **37 + `N`** | var | GCM payload |
+| 5 | 1 | OAEP hash — `0x02` SHA-256 · `0x03` SHA-384 · `0x04` SHA-512 |
+| 6 | 12 | GCM nonce |
+| 18 | 4 | Wrapped-key length `N` (`Int32` LE) |
+| 22 | `N` | Wrapped data key — **RSAES-OAEP with the selected hash** over the 32-byte data key |
+| 22 + `N` | 16 | Key-confirmation tag (§6) |
+| **38 + `N`** | var | GCM payload |
 
-`N` equals the RSA modulus size in bytes (256 for RSA-2048, 512 for RSA-4096).
+`N` equals the RSA modulus size in bytes (256 for RSA-2048, 512 for RSA-4096), independently of the
+hash.
+
+The OAEP-hash byte occupies the same offset 5 that §3.4 and §3.5 give their parameter-set byte, so all
+three public-key methods carry their algorithm selector in the same place, and methods `0x03` and `0x04`
+are structurally identical: both are `38 + N`.
+
+> **The hash byte is a wire encoding, not the enum's numeric value.**
+> `Enigma.Core.Asymmetric.PublicKey.RsaOaepHash` is a plain (unnumbered) C# enum declaring
+> `Sha1`, `Sha256`, `Sha384`, `Sha512`. The wire bytes are 1-based and follow that declaration order —
+> `0x01` SHA-1, `0x02` SHA-256, `0x03` SHA-384, `0x04` SHA-512 — so `0x00` is never a valid value and a
+> zero-filled header cannot parse, exactly as in §3.4. Implementations must map explicitly and must not
+> cast.
+
+**`0x01` (SHA-1) is reserved, not accepted** (§10). A writer must never emit it and a reader must reject
+it. Numbering it anyway is what keeps enabling SHA-1 later a pure un-reservation rather than a
+renumbering. Nothing mandates OAEP-SHA-1, and because no external system ever unwraps these keys, the
+legacy-interop argument that usually rescues SHA-1 does not apply here.
+
+**SHA-256 is the default.** SHA-384 and SHA-512 exist for callers under a policy that mandates them for
+key transport; they are not stronger choices here (see §4). The hash does interact with the key size:
+RFC 8017 §7.1.1 requires `k >= 2·hLen + 34` to wrap a 32-byte data key, so an RSA-1024 modulus (128
+bytes) is too small for SHA-384 (needs 130) and SHA-512 (needs 162). RSA-2048 and above accept all
+three.
+
+**A reader takes the hash from the header, never from its caller.** Decryption has no hash parameter;
+the byte at offset 5 selects the unwrap. An edited byte therefore makes the OAEP unwrap fail, which §9
+already covers — it needs no rule of its own.
 
 There is **no public-key fingerprint field**. OAEP unwrap already fails fast on the wrong key, and
 the key-confirmation tag (§6) covers wrong-credential detection uniformly across every method, so
@@ -326,7 +356,7 @@ selectable.**
 | PBKDF2 PRF | HMAC-SHA256 (`Enigma.Core.KeyDerivation.Pbkdf2Prf.HmacSha256`) |
 | Argon2 variant | Argon2id (`Enigma.Core.KeyDerivation.Argon2Variant.Argon2id`) |
 | Argon2 version | 1.3 (`Enigma.Core.KeyDerivation.Argon2Version.Version13`) |
-| RSA key wrapping (methods `0x03` and `0x05`) | RSAES-OAEP, SHA-256 (`Enigma.Core.Asymmetric.PublicKey.RsaOaepHash.Sha256`) |
+| RSA key wrapping (**method `0x05` only**) | RSAES-OAEP, SHA-256 (`Enigma.Core.Asymmetric.PublicKey.RsaOaepHash.Sha256`) — method `0x03`'s wrapping hash is a header field instead, see §3.3 |
 | Hybrid key combiner (method `0x05`) | XOR of two HMAC-SHA256 split-key PRFs (§3.5.1) |
 | Hybrid combiner labels | `Enigma.DataEncryption/hybrid/rsa/v1` and `Enigma.DataEncryption/hybrid/mlkem/v1` |
 | Key-confirmation tag size | 16 bytes |
@@ -338,8 +368,20 @@ downgrade lever**, and every one of these choices is already the correct one. Th
 "negotiation" to be had, so the format offers none. (The header *is* authenticated — §5 — so an edit
 would be detected; the point is that there is nothing worth offering an attacker in the first place.)
 
-The only algorithmic field a container carries is the cipher byte (§2.4), where all four options are
-equivalent 256-bit AEADs and no choice is a downgrade of another.
+A container carries exactly **two** algorithmic fields, and each is admitted on the same narrow ground:
+within it, no accepted value is a downgrade of another.
+
+- The **cipher byte** (§2.4) — all four options are equivalent 256-bit AEADs.
+- Method `0x03`'s **OAEP-hash byte** (§3.3) — OAEP's security proof asks no collision resistance of its
+  hash, so SHA-256, SHA-384 and SHA-512 are equivalent choices rather than a ladder, and the one value
+  that *would* be a downgrade, SHA-1, is not accepted at all (§10). The field therefore offers nothing to
+  downgrade *to*, which is why it does not reintroduce the negotiation lever this section rules out. The
+  reason it is selectable is compliance, not security: a caller under a policy mandating SHA-384 or
+  SHA-512 for key transport has no other way to comply.
+
+Method `0x05` keeps a fixed OAEP-SHA-256 wrap. Its data key is a *combination* of two secrets (§3.5.1),
+so the wrap is one input to a construction rather than the whole of key transport, and it carries no
+compliance argument of its own — the table row above is normative for it.
 
 ### 4.1 Default cost parameters
 
@@ -393,7 +435,7 @@ where:
   `45 6E 69 67 6D 61 2E 44 61 74 61 45 6E 63 72 79 70 74 69 6F 6E 2F 6B 63 2F 76 31`
 - `K` is the 32-byte data key, used here as the **HMAC key** (not as the message).
 - `headerBytesBeforeTag` is every header byte from offset 0 up to, but not including, the tag —
-  i.e. the first 37 bytes for PBKDF2, 45 for Argon2, 21 + `N` for RSA, 22 + `N` for ML-KEM, and
+  i.e. the first 37 bytes for PBKDF2, 45 for Argon2, 22 + `N` for RSA, 22 + `N` for ML-KEM, and
   26 + `N` + `M` for the hybrid.
 - `[0..16]` is the **leftmost** 16 bytes of the 32-byte HMAC output.
 
@@ -446,7 +488,8 @@ iterations or 64 MiB of Argon2id memory per attempt.
 2. **Generate** the salt (16 bytes), the GCM nonce (12 bytes) and — for RSA and the hybrid — the 32-byte
    secret the RSA wrap transports, from `IRandomSource`. ML-KEM generates no key material of its own.
 3. **Derive, obtain or combine `K`**: PBKDF2/Argon2 derive it from the password and salt; RSA wraps a
-   freshly generated `K` under the recipient's public key; ML-KEM encapsulates against the recipient's
+   freshly generated `K` under the recipient's public key **with the OAEP hash the caller selected**
+   (§3.3), which is recorded in the header; ML-KEM encapsulates against the recipient's
    public key and takes the shared secret as `K`; the hybrid does **both** — wrap, then encapsulate, then
    combine the two secrets and the two ciphertexts into `K` per §3.5.1. Both public-key operations
    precede any write, so a public key the library cannot use leaves the output stream untouched.
@@ -461,12 +504,14 @@ iterations or 64 MiB of Argon2id memory per attempt.
 
 1. **Read and validate the common prefix** — magic is `EC DE`; the method byte matches the service
    being used; the version byte is `0x10`; the cipher byte is defined.
-2. **Read the method-body fields**, including the parameter-set byte for ML-KEM and the hybrid.
+2. **Read the method-body fields**, including the OAEP-hash byte for RSA and the parameter-set byte for
+   ML-KEM and the hybrid.
 3. **Validate every cost and length field against `DataEncryptionLimits` (§8) — before any allocation
    or KDF work.** This ordering is the point of the limits: a header claiming 2,000,000,000 Argon2
    iterations must be rejected by arithmetic, not survived by computation.
 4. **Derive, unwrap or combine `K`**: PBKDF2/Argon2 re-derive from the password and the stored salt and
-   costs; RSA unwraps the wrapped key; ML-KEM decapsulates the encapsulation; the hybrid unwraps **and**
+   costs; RSA unwraps the wrapped key **under the OAEP hash the header names** — never one the caller
+   supplies; ML-KEM decapsulates the encapsulation; the hybrid unwraps **and**
    decapsulates, then combines per §3.5.1. The hybrid unwraps before it decapsulates, which is why a
    wrong RSA private key is reported by OAEP while a wrong ML-KEM private key reaches step 5.
 5. **Recompute and verify `kcTag`** with a constant-time comparison (§6.2). On mismatch, fail here —
@@ -526,6 +571,7 @@ The exception a reader raises is part of the contract.
 | Version byte not `0x10` (includes every reserved legacy value) | `DataEncryptionFormatException` |
 | Cipher byte undefined | `DataEncryptionFormatException` |
 | ML-KEM parameter-set byte undefined (methods `0x04` and `0x05`) | `DataEncryptionFormatException` |
+| RSA OAEP-hash byte `0x00`, the reserved `0x01`, or `0x05`–`0xFF` (method `0x03`) | `DataEncryptionFormatException` |
 | Stream ends inside the header | `DataEncryptionFormatException` |
 | A cost or length field exceeds `DataEncryptionLimits`, or is `<= 0` | `DataEncryptionFormatException` |
 | `Enigma.Core` `ReadLengthValue*` `InvalidOperationException` | translated to `DataEncryptionFormatException` |
@@ -537,6 +583,8 @@ The exception a reader raises is part of the contract.
 | Malformed / unusable **public**-key PEM | propagates from Enigma.Core (`ArgumentException` / `FormatException`) — same reasoning, on the way out |
 | ML-KEM decapsulation failure, **including a private key that is malformed or for another parameter set** (`CryptographicException`) | `DataDecryptionException`, wrapping it |
 | ML-KEM encapsulation failure — the caller's public key is malformed or for another parameter set (`CryptographicException`) | `ArgumentException` on the ML-KEM public-key parameter, wrapping it |
+| RSA OAEP **wrap** failure — the caller's public key is too small for the selected hash (`CryptographicException`) | `ArgumentException` on the RSA public-key parameter, wrapping it |
+| An `RsaOaepHash` argument that is `Sha1` or undefined | `ArgumentOutOfRangeException` on the hash parameter |
 | Null / empty / out-of-range arguments | `ArgumentNullException` / `ArgumentException` / `ArgumentOutOfRangeException` |
 | Cancellation | `OperationCanceledException` |
 
@@ -568,6 +616,15 @@ sender chooses what it wraps.
 > `publicKey`. Enigma.Core's RSA path already reports an unusable public key that way, so the two methods
 > agree on the encrypt side.
 
+> **Why an RSA wrap failure is an argument error.** A public key too small for the selected OAEP hash
+> (§3.3: `k >= 2·hLen + 34`) makes Enigma.Core's `EncryptOaep` raise `CryptographicException`. This is the
+> encrypt side, where the only thing the caller supplied that the operation can be about is the public key
+> itself — the same situation as ML-KEM `Encapsulate` above — so it is reported the same way:
+> `ArgumentException` on the public-key parameter, with the original kept as `InnerException`.
+> Pre-validating the modulus size instead is not available: Enigma.Core exposes no modulus-size accessor,
+> and this library parses no PEM of its own. The row covers **the default SHA-256 as well**, where it is
+> reachable for any modulus below 98 bytes.
+
 `DataEncryptionFormatException` and `DataDecryptionException` both derive from
 `DataEncryptionException`, so a caller that does not care which can catch the base type.
 
@@ -586,9 +643,16 @@ it found it, because detecting *that* edit is the AAD's job (§5) and requires a
 | Where | Value(s) | Reserved for |
 |---|---|---|
 | Format version (offset 3) | `0x01`–`0x0F` | Legacy `Enigma.Cryptography.DataEncryption` containers |
+| RSA OAEP hash (offset 5, method `0x03`) | `0x01` | OAEP-SHA-1 (§3.3) |
 
-A conforming reader of format version `0x10` rejects that range. It is recorded here so that a later
-implementation does not need a format-version bump to claim it.
+A conforming reader of format version `0x10` rejects both. They are recorded here so that a later
+implementation does not need a format-version bump to claim them.
+
+The OAEP-hash byte is numbered from `0x01` so that its wire values follow `RsaOaepHash`'s declaration
+order, which is why SHA-1 has a value at all despite being rejected: enabling it later is then an
+un-reservation and nothing more. `0x00` is not reserved — it is permanently invalid, so that a zero-filled
+header cannot parse. Values `0x05`–`0xFF` are undefined and rejected, but are not reserved for anything in
+particular.
 
 Method byte `0x05` **was** reserved here, for the RSA + ML-KEM hybrid, and has since been assigned to it
 (§3.5) — which is the reservation mechanism working exactly as intended: the hybrid landed without a

@@ -3,6 +3,7 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Enigma.Core.Asymmetric.Pqc;
+using Enigma.Core.Asymmetric.PublicKey;
 using Enigma.Core.Hashing.Hmac;
 using Enigma.DataEncryption.Internal;
 
@@ -30,6 +31,13 @@ internal static class FormatTestData
     /// fixtures use.
     /// </summary>
     internal const MLKemParameterSet MLKemFixtureParameterSet = MLKemParameterSet.MLKem512;
+
+    /// <summary>The OAEP hash the <see cref="HeaderShape.Rsa"/> fixture records at offset 5.</summary>
+    /// <remarks>
+    /// The default, so the shape stays the one a caller who selects nothing produces. The suites that
+    /// care about the <i>other</i> two values sweep them explicitly.
+    /// </remarks>
+    internal const RsaOaepHash RsaFixtureOaepHash = RsaOaepHash.Sha256;
 
     /// <summary>
     /// Every header shape, so a suite that must hold for all of them says so once rather than listing
@@ -138,7 +146,8 @@ internal static class FormatTestData
             DataKey(), HmacSha256(), CancellationToken.None),
 
         HeaderShape.Rsa => HeaderWriter.WriteRsaHeaderAsync(
-            output, cipher, Nonce(), WrappedKey(), DataKey(), HmacSha256(), CancellationToken.None),
+            output, cipher, RsaFixtureOaepHash, Nonce(), WrappedKey(), DataKey(), HmacSha256(),
+            CancellationToken.None),
 
         // The hybrid's DataKey() stands in for the combiner's output, which PHASE01-style header tests do
         // not need to be real: HeaderWriter takes the combined key as an opaque 32 bytes, and whether it

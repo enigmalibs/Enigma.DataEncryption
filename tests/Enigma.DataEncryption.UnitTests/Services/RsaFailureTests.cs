@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.IO;
 using System.Security.Cryptography;
 using System.Threading.Tasks;
+using Enigma.Core.Asymmetric.PublicKey;
+using Enigma.DataEncryption.Internal;
 using Enigma.DataEncryption.UnitTests.Internal;
 using Xunit;
 
@@ -45,14 +47,15 @@ public sealed class RsaFailureTests(RsaKeyFixture keys)
         { "method", 2 },
         { "format version", 3 },
         { "cipher", 4 },
-        { "nonce (first byte)", 5 },
-        { "nonce (last byte)", 16 },
-        { "wrapped-key length (first byte)", 17 },
-        { "wrapped-key length (last byte)", 20 },
-        { "wrapped key (first byte)", 21 },
-        { "wrapped key (middle byte)", 21 + (RsaTestData.WrappedKeyLength2048 / 2) },
-        { "wrapped key (last byte)", 21 + RsaTestData.WrappedKeyLength2048 - 1 },
-        { "key-confirmation tag (first byte)", 21 + RsaTestData.WrappedKeyLength2048 },
+        { "OAEP hash", 5 },
+        { "nonce (first byte)", 6 },
+        { "nonce (last byte)", 17 },
+        { "wrapped-key length (first byte)", 18 },
+        { "wrapped-key length (last byte)", 21 },
+        { "wrapped key (first byte)", 22 },
+        { "wrapped key (middle byte)", 22 + (RsaTestData.WrappedKeyLength2048 / 2) },
+        { "wrapped key (last byte)", 22 + RsaTestData.WrappedKeyLength2048 - 1 },
+        { "key-confirmation tag (first byte)", 22 + RsaTestData.WrappedKeyLength2048 },
         { "key-confirmation tag (last byte)", RsaTestData.HeaderLength2048 - 1 },
     };
 
@@ -414,6 +417,151 @@ public sealed class RsaFailureTests(RsaKeyFixture keys)
             await Assert.ThrowsAsync<DataEncryptionFormatException>(
                 () => RsaTestData.DecryptToBytesAsync(keys.PrivateKeyPem, edited));
         }
+    }
+
+    // --- An edited OAEP-hash byte -------------------------------------------------------------------
+
+    /// <summary>
+    /// Editing the hash byte to <b>another accepted hash</b> needs no rule of its own
+    /// (<c>docs/format.md</c> §3.3): the reader uses the byte to choose the unwrap, so a wrong value makes
+    /// OAEP fail, and §9 already maps that to <see cref="DataDecryptionException"/> with the cause inside.
+    /// That is asserted here rather than special-cased in the reader.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(OaepHashEdits))]
+    public async Task EditingTheHashByteToAnotherAcceptedHashIsADecryptionError(
+        RsaOaepHash written,
+        byte editedTo)
+    {
+        byte[] container = await RsaTestData.EncryptToBytesAsync(
+            keys.PublicKeyPem, RsaTestData.Plaintext(128), oaepHash: written);
+
+        byte[] edited = FormatTestData.WithByteAt(container, RsaTestData.OaepHashOffset, editedTo);
+
+        DataDecryptionException exception = await Assert.ThrowsAsync<DataDecryptionException>(
+            () => RsaTestData.DecryptToBytesAsync(keys.PrivateKeyPem, edited));
+
+        Assert.IsAssignableFrom<CryptographicException>(exception.InnerException);
+    }
+
+    /// <summary>Each accepted hash paired with each of the other two accepted wire bytes.</summary>
+    /// <returns>The theory data.</returns>
+    public static TheoryData<RsaOaepHash, byte> OaepHashEdits() => new()
+    {
+        { RsaOaepHash.Sha256, 0x03 },
+        { RsaOaepHash.Sha256, 0x04 },
+        { RsaOaepHash.Sha384, 0x02 },
+        { RsaOaepHash.Sha384, 0x04 },
+        { RsaOaepHash.Sha512, 0x02 },
+        { RsaOaepHash.Sha512, 0x03 },
+    };
+
+    /// <summary>
+    /// Editing it to <c>0x00</c>, the reserved SHA-1 byte, or anything undefined is a format error — the
+    /// reader rejects the value before it reaches any key operation.
+    /// </summary>
+    [Theory]
+    [InlineData(0x00)]
+    [InlineData(0x01)]
+    [InlineData(0x05)]
+    [InlineData(0x7F)]
+    [InlineData(0xFF)]
+    public async Task EditingTheHashByteToAnInvalidValueIsAFormatError(byte hashByte)
+    {
+        byte[] container = await RsaTestData.EncryptToBytesAsync(keys.PublicKeyPem, RsaTestData.Plaintext(128));
+        byte[] edited = FormatTestData.WithByteAt(container, RsaTestData.OaepHashOffset, hashByte);
+
+        await Assert.ThrowsAsync<DataEncryptionFormatException>(
+            () => RsaTestData.DecryptToBytesAsync(keys.PrivateKeyPem, edited));
+    }
+
+    /// <summary>
+    /// An invalid hash byte is rejected before a payload byte is read, like every other structural field —
+    /// so the reserved SHA-1 byte costs a reader nothing.
+    /// </summary>
+    [Fact]
+    public async Task AnInvalidHashByteIsRejectedBeforeThePayloadIsRead()
+    {
+        byte[] container = await RsaTestData.EncryptToBytesAsync(keys.PublicKeyPem, RsaTestData.Plaintext(4_096));
+        byte[] header = FormatTestData.WithByteAt(
+            container[..RsaTestData.HeaderLength2048], RsaTestData.OaepHashOffset, RsaOaepHashWire.Sha1Byte);
+
+        using PoisonedPayloadStream input = new(header);
+        using MemoryStream output = new();
+
+        await Assert.ThrowsAsync<DataEncryptionFormatException>(
+            () => RsaTestData.Service().DecryptAsync(
+                input, output, keys.PrivateKeyPem,
+                cancellationToken: TestContext.Current.CancellationToken));
+
+        Assert.False(input.PayloadWasRead);
+        Assert.Equal(0, output.Length);
+    }
+
+    // --- A public key too small for the selected hash ------------------------------------------------
+
+    /// <summary>
+    /// A modulus too small to wrap 32 bytes under the selected hash is the caller's public key being
+    /// unusable, so it is an <see cref="ArgumentException"/> on <c>publicKeyPem</c> with Enigma.Core's
+    /// <see cref="CryptographicException"/> preserved inside — the new row of <c>docs/format.md</c> §9.
+    /// RSA-1024 is 128 bytes, and SHA-384 needs 130.
+    /// </summary>
+    [Theory]
+    [InlineData(RsaOaepHash.Sha384)]
+    [InlineData(RsaOaepHash.Sha512)]
+    public async Task ATooSmallPublicKeyIsAnArgumentErrorOnThePublicKey(RsaOaepHash oaepHash)
+    {
+        ArgumentException exception = await Assert.ThrowsAsync<ArgumentException>(
+            () => RsaTestData.EncryptToBytesAsync(
+                keys.PublicKeyPem1024, RsaTestData.Plaintext(64), oaepHash: oaepHash));
+
+        Assert.Equal("publicKeyPem", exception.ParamName);
+        Assert.IsAssignableFrom<CryptographicException>(exception.InnerException);
+    }
+
+    /// <summary>
+    /// <b>The same gap under the default hash.</b> This was reachable before the hash became selectable —
+    /// SHA-256 needs a 98-byte modulus, so a 512-bit key already failed — and Enigma.Core's exception
+    /// escaped unwrapped and undocumented. The row covers it now, so it is asserted here too.
+    /// </summary>
+    [Fact]
+    public async Task ATooSmallPublicKeyIsAnArgumentErrorUnderTheDefaultHashToo()
+    {
+        ArgumentException exception = await Assert.ThrowsAsync<ArgumentException>(
+            () => RsaTestData.EncryptToBytesAsync(keys.PublicKeyPem512, RsaTestData.Plaintext(64)));
+
+        Assert.Equal("publicKeyPem", exception.ParamName);
+        Assert.IsAssignableFrom<CryptographicException>(exception.InnerException);
+    }
+
+    /// <summary>
+    /// RSA-1024 still works under SHA-256, which is what makes the two tests above about the hash rather
+    /// than about the key being rejected outright.
+    /// </summary>
+    [Fact]
+    public async Task RsaTenTwentyFourStillWorksUnderTheDefaultHash()
+    {
+        byte[] plaintext = RsaTestData.Plaintext(64);
+
+        byte[] container = await RsaTestData.EncryptToBytesAsync(keys.PublicKeyPem1024, plaintext);
+
+        Assert.Equal(RsaTestData.HeaderLength(128) + plaintext.Length + 16, container.Length);
+        Assert.Equal(plaintext, await RsaTestData.DecryptToBytesAsync(keys.PrivateKeyPem1024, container));
+    }
+
+    /// <summary>A rejected wrap leaves the output stream untouched — the wrap precedes every write.</summary>
+    [Fact]
+    public async Task ATooSmallPublicKeyWritesNothing()
+    {
+        using MemoryStream input = new(RsaTestData.Plaintext(64), writable: false);
+        using MemoryStream output = new();
+
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => RsaTestData.Service().EncryptAsync(
+                input, output, Cipher.Aes256Gcm, keys.PublicKeyPem1024, RsaOaepHash.Sha512,
+                cancellationToken: TestContext.Current.CancellationToken));
+
+        Assert.Equal(0, output.Length);
     }
 
     /// <summary>

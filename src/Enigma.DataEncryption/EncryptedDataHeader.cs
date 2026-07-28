@@ -1,4 +1,5 @@
 using Enigma.Core.Asymmetric.Pqc;
+using Enigma.Core.Asymmetric.PublicKey;
 
 namespace Enigma.DataEncryption;
 
@@ -43,7 +44,7 @@ public sealed record EncryptedDataHeader
 
     /// <summary>
     /// The total header length in bytes — equivalently, the <b>offset of the first payload byte</b>.
-    /// 53 for PBKDF2, 61 for Argon2, 37 + <see cref="WrappedKeyLength"/> for RSA,
+    /// 53 for PBKDF2, 61 for Argon2, 38 + <see cref="WrappedKeyLength"/> for RSA,
     /// 38 + <see cref="EncapsulationLength"/> for ML-KEM, and
     /// 42 + <see cref="WrappedKeyLength"/> + <see cref="EncapsulationLength"/> for the hybrid.
     /// </summary>
@@ -55,6 +56,19 @@ public sealed record EncryptedDataHeader
     /// <see cref="EncryptionMethod.Hybrid"/>; otherwise <see langword="null"/>.
     /// </summary>
     public MLKemParameterSet? MLKemParameterSet { get; init; }
+
+    /// <summary>
+    /// The hash backing the RSAES-OAEP padding that wrapped the data key, from header offset 5.
+    /// Populated only when <see cref="Method"/> is <see cref="EncryptionMethod.Rsa"/>; otherwise
+    /// <see langword="null"/>.
+    /// </summary>
+    /// <remarks>
+    /// <see langword="null"/> for <see cref="EncryptionMethod.Hybrid"/> even though it also performs an
+    /// RSA wrap: that method's hash is fixed at SHA-256 by the format, so no container records it
+    /// (<c>docs/format.md</c> §4). Never <see cref="Enigma.Core.Asymmetric.PublicKey.RsaOaepHash.Sha1"/> —
+    /// its wire byte is reserved and rejected while parsing (§10).
+    /// </remarks>
+    public RsaOaepHash? RsaOaepHash { get; init; }
 
     /// <summary>
     /// The PBKDF2 iteration count stored in the header. Populated only when <see cref="Method"/> is

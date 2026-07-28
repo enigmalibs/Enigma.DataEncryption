@@ -3,6 +3,7 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Enigma.Core.Asymmetric.Pqc;
+using Enigma.Core.Asymmetric.PublicKey;
 using Enigma.DataEncryption.Internal;
 
 namespace Enigma.DataEncryption;
@@ -367,11 +368,13 @@ public static class DataEncryptionFileExtensions
     /// <param name="outputPath">Path of the container file to write. <b>Overwritten if it exists</b>; deleted if the operation fails.</param>
     /// <param name="cipher">The AEAD block cipher to protect the payload with.</param>
     /// <param name="publicKeyPem">The recipient's RSA public key, PEM-encoded.</param>
+    /// <param name="oaepHash">The hash backing the OAEP padding, recorded in the header. SHA-256 (the default), SHA-384 and SHA-512 are accepted; SHA-1 is rejected. Validated <b>before either file is opened</b>.</param>
     /// <param name="progress">Optional progress receiver, reporting <b>payload bytes processed</b>.</param>
     /// <param name="cancellationToken">Optional token to cancel the operation.</param>
     /// <returns>A task representing the asynchronous encryption.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="service"/>, <paramref name="inputPath"/>, <paramref name="outputPath"/> or <paramref name="publicKeyPem"/> is <see langword="null"/>.</exception>
-    /// <exception cref="ArgumentException">A path is empty, or <paramref name="publicKeyPem"/> is empty or not a readable RSA public-key PEM, or <paramref name="cipher"/> is not a defined value.</exception>
+    /// <exception cref="ArgumentException">A path is empty, or <paramref name="publicKeyPem"/> is empty, not a readable RSA public-key PEM, or too small to wrap a 32-byte data key under <paramref name="oaepHash"/>; or <paramref name="cipher"/> is not a defined value.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="oaepHash"/> is SHA-1, which this format does not accept, or is not a defined value.</exception>
     /// <exception cref="IOException">A file could not be opened, read or written.</exception>
     /// <exception cref="OperationCanceledException">The operation was cancelled; the partial output file has been deleted.</exception>
     public static Task EncryptFileAsync(
@@ -380,18 +383,20 @@ public static class DataEncryptionFileExtensions
         string outputPath,
         Cipher cipher,
         string publicKeyPem,
+        RsaOaepHash oaepHash = RsaOaepHash.Sha256,
         IProgress<int>? progress = null,
         CancellationToken cancellationToken = default)
     {
         ValidateTarget(service, inputPath, outputPath);
         CipherResolver.ValidateArgument(cipher, nameof(cipher));
         ValidatePem(publicKeyPem, nameof(publicKeyPem));
+        RsaOaepHashWire.ValidateArgument(oaepHash, nameof(oaepHash));
 
         return RunAsync(
             inputPath,
             outputPath,
             (input, output) => service.EncryptAsync(
-                input, output, cipher, publicKeyPem, progress, cancellationToken));
+                input, output, cipher, publicKeyPem, oaepHash, progress, cancellationToken));
     }
 
     /// <summary>Decrypts the RSA container at <paramref name="inputPath"/> to <paramref name="outputPath"/>.</summary>
@@ -407,7 +412,7 @@ public static class DataEncryptionFileExtensions
     /// <exception cref="ArgumentNullException"><paramref name="service"/>, <paramref name="inputPath"/>, <paramref name="outputPath"/> or <paramref name="privateKeyPem"/> is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException">A path is empty, or <paramref name="privateKeyPem"/> is empty or not a readable RSA private-key PEM.</exception>
     /// <exception cref="IOException">A file could not be opened, read or written.</exception>
-    /// <exception cref="DataEncryptionFormatException">The file is not a valid RSA container, or the wrapped-key length is out of bounds.</exception>
+    /// <exception cref="DataEncryptionFormatException">The file is not a valid RSA container, its OAEP-hash byte is undefined or the reserved SHA-1 value, or the wrapped-key length is out of bounds.</exception>
     /// <exception cref="DataDecryptionException">The private key does not match the container, or the payload fails authentication.</exception>
     /// <exception cref="OperationCanceledException">The operation was cancelled; the partial output file has been deleted.</exception>
     public static Task DecryptFileAsync(

@@ -15,7 +15,7 @@ public enum HeaderShape
     /// <summary>Method <c>0x02</c> — Argon2, 61 bytes.</summary>
     Argon2,
 
-    /// <summary>Method <c>0x03</c> — RSA, 37 + N bytes.</summary>
+    /// <summary>Method <c>0x03</c> — RSA, 38 + N bytes.</summary>
     Rsa,
 
     /// <summary>Method <c>0x04</c> — ML-KEM, 38 + N bytes.</summary>

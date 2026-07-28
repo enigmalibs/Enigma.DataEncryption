@@ -1,7 +1,9 @@
+using System;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Enigma.Core.Asymmetric.Pqc;
+using Enigma.Core.Asymmetric.PublicKey;
 using Enigma.DataEncryption.Internal;
 using Xunit;
 
@@ -93,15 +95,15 @@ public sealed class HeaderGoldenBytesTests
     }
 
     /// <summary>
-    /// The RSA wrapped-key length field, at offset 17: 256 is <c>00 01 00 00</c> little-endian, and
+    /// The RSA wrapped-key length field, at offset 18: 256 is <c>00 01 00 00</c> little-endian, and
     /// would be <c>00 00 01 00</c> big-endian.
     /// </summary>
     [Fact]
-    public async Task RsaWrappedKeyLengthField_IsLittleEndianAtOffset17()
+    public async Task RsaWrappedKeyLengthField_IsLittleEndianAtOffset18()
     {
         byte[] header = await FormatTestData.BuildHeaderAsync(HeaderShape.Rsa);
 
-        Assert.Equal<byte[]>([0x00, 0x01, 0x00, 0x00], header[17..21]);
+        Assert.Equal<byte[]>([0x00, 0x01, 0x00, 0x00], header[18..22]);
     }
 
     /// <summary>The ML-KEM encapsulation length field, at offset 18: 768 is <c>00 03 00 00</c>.</summary>
@@ -160,11 +162,60 @@ public sealed class HeaderGoldenBytesTests
 
     /// <summary>The variable-length field must be the bytes handed to the writer, at the specified offset.</summary>
     [Fact]
-    public async Task RsaWrappedKey_IsAtOffset21()
+    public async Task RsaWrappedKey_IsAtOffset22()
     {
         byte[] header = await FormatTestData.BuildHeaderAsync(HeaderShape.Rsa);
 
-        Assert.Equal(FormatTestData.WrappedKey(), header[21..(21 + FormatTestData.RsaWrappedKeyLength)]);
+        Assert.Equal(FormatTestData.WrappedKey(), header[22..(22 + FormatTestData.RsaWrappedKeyLength)]);
+    }
+
+    /// <summary>
+    /// The RSA OAEP-hash byte sits at offset 5, <b>before</b> the nonce — the same place ML-KEM puts its
+    /// parameter set, so the two public-key shapes agree structurally (<c>docs/format.md</c> §3.3).
+    /// </summary>
+    [Theory]
+    [InlineData(RsaOaepHash.Sha256, 0x02)]
+    [InlineData(RsaOaepHash.Sha384, 0x03)]
+    [InlineData(RsaOaepHash.Sha512, 0x04)]
+    public async Task RsaOaepHashByte_IsAtOffset5(RsaOaepHash oaepHash, byte expected)
+    {
+        using MemoryStream output = new();
+        byte[] header = await HeaderWriter.WriteRsaHeaderAsync(
+            output,
+            Cipher.Aes256Gcm,
+            oaepHash,
+            FormatTestData.Nonce(),
+            FormatTestData.WrappedKey(),
+            FormatTestData.DataKey(),
+            FormatTestData.HmacSha256(),
+            CancellationToken.None);
+
+        Assert.Equal(expected, header[5]);
+        // …and the nonce follows it, rather than preceding it.
+        Assert.Equal(FormatTestData.Nonce(), header[6..18]);
+    }
+
+    /// <summary>
+    /// The reserved SHA-1 byte is unreachable from the write path: the writer rejects the value rather than
+    /// emitting <c>0x01</c> (<c>docs/format.md</c> §10).
+    /// </summary>
+    [Fact]
+    public async Task RsaOaepHashByte_IsNeverTheReservedSha1Value()
+    {
+        using MemoryStream output = new();
+
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+            () => HeaderWriter.WriteRsaHeaderAsync(
+                output,
+                Cipher.Aes256Gcm,
+                RsaOaepHash.Sha1,
+                FormatTestData.Nonce(),
+                FormatTestData.WrappedKey(),
+                FormatTestData.DataKey(),
+                FormatTestData.HmacSha256(),
+                CancellationToken.None));
+
+        Assert.Equal(0, output.Length);
     }
 
     /// <summary>Likewise for ML-KEM, where the encapsulation starts at offset 22.</summary>

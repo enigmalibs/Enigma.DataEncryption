@@ -3,6 +3,7 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Enigma.Core.Asymmetric.Pqc;
+using Enigma.Core.Asymmetric.PublicKey;
 using Enigma.DataEncryption.Internal;
 using Xunit;
 
@@ -186,7 +187,8 @@ public sealed class HeaderRoundTripTests
 
         Assert.Equal(FormatTestData.WrappedKey(), parsed.WrappedKey);
         Assert.Equal(FormatTestData.RsaWrappedKeyLength, parsed.Header.WrappedKeyLength);
-        Assert.Equal(37 + FormatTestData.RsaWrappedKeyLength, parsed.Header.HeaderLength);
+        Assert.Equal(FormatTestData.RsaFixtureOaepHash, parsed.Header.RsaOaepHash);
+        Assert.Equal(38 + FormatTestData.RsaWrappedKeyLength, parsed.Header.HeaderLength);
 
         Assert.Null(parsed.Salt);
         Assert.Null(parsed.Header.Pbkdf2Iterations);
@@ -358,6 +360,7 @@ public sealed class HeaderRoundTripTests
         await HeaderWriter.WriteRsaHeaderAsync(
             container,
             Cipher.Serpent256Gcm,
+            FormatTestData.RsaFixtureOaepHash,
             FormatTestData.Nonce(),
             wrappedKey,
             FormatTestData.DataKey(),
@@ -369,7 +372,60 @@ public sealed class HeaderRoundTripTests
             container, EncryptionMethod.Rsa, DataEncryptionLimits.Default, CancellationToken.None);
 
         Assert.Equal(wrappedKey, parsed.WrappedKey);
-        Assert.Equal(37 + wrappedKeyLength, parsed.Header.HeaderLength);
+        Assert.Equal(38 + wrappedKeyLength, parsed.Header.HeaderLength);
+    }
+
+    /// <summary>
+    /// Every accepted OAEP hash survives the writer/reader pair, and the reader reports it on both the
+    /// internal result and the public header — <c>docs/format.md</c> §3.3.
+    /// </summary>
+    [Theory]
+    [InlineData(RsaOaepHash.Sha256)]
+    [InlineData(RsaOaepHash.Sha384)]
+    [InlineData(RsaOaepHash.Sha512)]
+    public async Task EveryRsaOaepHashRoundTrips(RsaOaepHash oaepHash)
+    {
+        byte[] wrappedKey = FormatTestData.Sequence(0x33, FormatTestData.RsaWrappedKeyLength);
+
+        using MemoryStream container = new();
+        await HeaderWriter.WriteRsaHeaderAsync(
+            container,
+            Cipher.Twofish256Gcm,
+            oaepHash,
+            FormatTestData.Nonce(),
+            wrappedKey,
+            FormatTestData.DataKey(),
+            FormatTestData.HmacSha256(),
+            CancellationToken.None);
+
+        // The byte really is at offset 5, not merely recoverable.
+        Assert.Equal(RsaOaepHashWire.ToWireByte(oaepHash), container.ToArray()[5]);
+
+        container.Position = 0;
+        ParsedHeader parsed = await HeaderReader.ReadAsync(
+            container, EncryptionMethod.Rsa, DataEncryptionLimits.Default, CancellationToken.None);
+
+        Assert.Equal(oaepHash, parsed.RsaOaepHash);
+        Assert.Equal(oaepHash, parsed.Header.RsaOaepHash);
+        Assert.Equal(wrappedKey, parsed.WrappedKey);
+    }
+
+    /// <summary>
+    /// The hash property is method-specific: only <c>0x03</c> populates it, and in particular the hybrid
+    /// does not, because its wrap is fixed at SHA-256 and no container records it (§4).
+    /// </summary>
+    [Theory]
+    [InlineData(HeaderShape.Pbkdf2)]
+    [InlineData(HeaderShape.Argon2)]
+    [InlineData(HeaderShape.MLKem)]
+    [InlineData(HeaderShape.Hybrid)]
+    public async Task OnlyTheRsaShapeReportsAnOaepHash(HeaderShape shape)
+    {
+        ParsedHeader parsed = await FormatTestData.ReadHeaderAsync(
+            await FormatTestData.BuildHeaderAsync(shape));
+
+        Assert.Null(parsed.RsaOaepHash);
+        Assert.Null(parsed.Header.RsaOaepHash);
     }
 
     // --- The tag the writer sealed is the tag the reader confirms -----------------------------------

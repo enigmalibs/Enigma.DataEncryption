@@ -26,7 +26,9 @@ as encrypting a short string. Both public-key operations are a fixed, fast prelu
 Three steps, in this order:
 
 1. A random 32-byte `rsaSecret` is generated and wrapped under the RSA public key with **RSAES-OAEP-SHA256**,
-   giving `wrappedRsaSecret`.
+   giving `wrappedRsaSecret`. Unlike [`IRsaDataEncryptionService`](rsa.md), this method's wrapping hash is
+   **fixed**, not selectable: the wrap is one input to the combiner below rather than the whole of key
+   transport, so no container records a hash for it and no `oaepHash` parameter exists here.
 2. A `kemSecret` is **encapsulated** against the ML-KEM public key, giving `encapsulation` alongside it.
 3. The data key is **combined** from both secrets, bound to both ciphertexts:
 

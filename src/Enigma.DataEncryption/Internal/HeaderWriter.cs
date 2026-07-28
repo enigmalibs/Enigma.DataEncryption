@@ -3,6 +3,7 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Enigma.Core.Asymmetric.Pqc;
+using Enigma.Core.Asymmetric.PublicKey;
 using Enigma.Core.Extensions;
 using Enigma.Core.Hashing.Hmac;
 
@@ -97,18 +98,26 @@ internal static class HeaderWriter
             .ConfigureAwait(false);
     }
 
-    /// <summary>Writes an RSA (method <c>0x03</c>) header. 37 + <c>N</c> bytes.</summary>
+    /// <summary>Writes an RSA (method <c>0x03</c>) header. 38 + <c>N</c> bytes.</summary>
     /// <param name="output">The container stream, positioned where the header begins.</param>
     /// <param name="cipher">The payload cipher, already validated.</param>
+    /// <param name="oaepHash">The OAEP hash <paramref name="wrappedKey"/> was produced under.</param>
     /// <param name="nonce">The 12-byte GCM nonce.</param>
     /// <param name="wrappedKey">The RSAES-OAEP-wrapped data key; its length becomes <c>N</c>.</param>
     /// <param name="dataKey">The 32-byte data key, used to compute the key-confirmation tag.</param>
     /// <param name="hmacSha256">An HMAC-SHA256 service.</param>
     /// <param name="cancellationToken">Token to cancel the write.</param>
     /// <returns>The complete header bytes, to be passed as the GCM associated data.</returns>
+    /// <remarks>
+    /// The OAEP-hash byte precedes the nonce, at the offset ML-KEM gives its parameter set — see
+    /// <c>docs/format.md</c> §3.3. Nothing here can check that <paramref name="oaepHash"/> is the hash
+    /// the wrap actually used; the one caller wraps and writes in the same breath, and the golden
+    /// vectors pin the resulting bytes.
+    /// </remarks>
     internal static async Task<byte[]> WriteRsaHeaderAsync(
         Stream output,
         Cipher cipher,
+        RsaOaepHash oaepHash,
         byte[] nonce,
         byte[] wrappedKey,
         byte[] dataKey,
@@ -117,6 +126,7 @@ internal static class HeaderWriter
     {
         using MemoryStream buffer = new(FormatLayout.RsaHeaderBaseLength + wrappedKey.Length);
         WriteCommonPrefix(buffer, EncryptionMethod.Rsa, cipher);
+        buffer.WriteByte(RsaOaepHashWire.ToWireByte(oaepHash));
         buffer.WriteBytes(nonce);
         buffer.WriteInt(wrappedKey.Length);
         buffer.WriteBytes(wrappedKey);

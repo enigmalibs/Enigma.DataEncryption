@@ -108,7 +108,7 @@ public sealed class HeaderTruncationTests
         byte[] header = await FormatTestData.BuildHeaderAsync(HeaderShape.Rsa);
 
         // Announce 4,096 bytes — within the cap — while supplying only 256.
-        byte[] patched = FormatTestData.WithInt32At(header, 17, 4_096);
+        byte[] patched = FormatTestData.WithInt32At(header, 18, 4_096);
 
         await Assert.ThrowsAsync<DataEncryptionFormatException>(
             () => FormatTestData.ReadHeaderAsync(patched, EncryptionMethod.Rsa));
@@ -161,7 +161,9 @@ public sealed class HeaderTruncationTests
             data.Add(HeaderShape.Argon2, length);
         }
 
-        foreach (int length in new[] { 0, 5, 17, 20, 21, 22, 276, 277, 292 })
+        // The RSA boundaries: the OAEP-hash byte at 5, the nonce, the length field at 18, its first value
+        // byte at 22, and the tag at 22 + N = 278.
+        foreach (int length in new[] { 0, 5, 6, 18, 21, 22, 23, 277, 278, 293 })
         {
             data.Add(HeaderShape.Rsa, length);
         }

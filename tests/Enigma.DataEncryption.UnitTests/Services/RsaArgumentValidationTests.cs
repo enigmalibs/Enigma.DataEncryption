@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Threading.Tasks;
+using Enigma.Core.Asymmetric.PublicKey;
 using Xunit;
 
 namespace Enigma.DataEncryption.UnitTests.Services;
@@ -31,13 +32,15 @@ public sealed class RsaArgumentValidationTests(RsaKeyFixture keys)
             "input",
             (await Assert.ThrowsAsync<ArgumentNullException>(
                 () => RsaTestData.Service().EncryptAsync(
-                    null!, stream, Cipher.Aes256Gcm, keys.PublicKeyPem, null, TestContext.Current.CancellationToken))).ParamName);
+                    null!, stream, Cipher.Aes256Gcm, keys.PublicKeyPem, RsaOaepHash.Sha256, null,
+                    TestContext.Current.CancellationToken))).ParamName);
 
         Assert.Equal(
             "output",
             (await Assert.ThrowsAsync<ArgumentNullException>(
                 () => RsaTestData.Service().EncryptAsync(
-                    stream, null!, Cipher.Aes256Gcm, keys.PublicKeyPem, null, TestContext.Current.CancellationToken))).ParamName);
+                    stream, null!, Cipher.Aes256Gcm, keys.PublicKeyPem, RsaOaepHash.Sha256, null,
+                    TestContext.Current.CancellationToken))).ParamName);
     }
 
     [Fact]
@@ -70,7 +73,8 @@ public sealed class RsaArgumentValidationTests(RsaKeyFixture keys)
             "publicKeyPem",
             (await Assert.ThrowsAsync<ArgumentNullException>(
                 () => RsaTestData.Service().EncryptAsync(
-                    input, output, Cipher.Aes256Gcm, null!, null, TestContext.Current.CancellationToken))).ParamName);
+                    input, output, Cipher.Aes256Gcm, null!, RsaOaepHash.Sha256, null,
+                    TestContext.Current.CancellationToken))).ParamName);
 
         Assert.Equal(
             "privateKeyPem",
@@ -87,7 +91,8 @@ public sealed class RsaArgumentValidationTests(RsaKeyFixture keys)
 
         ArgumentException publicKey = await Assert.ThrowsAsync<ArgumentException>(
             () => RsaTestData.Service().EncryptAsync(
-                input, output, Cipher.Aes256Gcm, string.Empty, null, TestContext.Current.CancellationToken));
+                input, output, Cipher.Aes256Gcm, string.Empty, RsaOaepHash.Sha256, null,
+                TestContext.Current.CancellationToken));
         Assert.Equal("publicKeyPem", publicKey.ParamName);
 
         ArgumentException privateKey = await Assert.ThrowsAsync<ArgumentException>(
@@ -106,7 +111,8 @@ public sealed class RsaArgumentValidationTests(RsaKeyFixture keys)
 
         ArgumentOutOfRangeException exception = await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
             () => RsaTestData.Service().EncryptAsync(
-                input, output, UndefinedCipher, keys.PublicKeyPem, null, TestContext.Current.CancellationToken));
+                input, output, UndefinedCipher, keys.PublicKeyPem, RsaOaepHash.Sha256, null,
+                TestContext.Current.CancellationToken));
 
         Assert.Equal("cipher", exception.ParamName);
 
@@ -127,9 +133,156 @@ public sealed class RsaArgumentValidationTests(RsaKeyFixture keys)
 
         ArgumentOutOfRangeException exception = await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
             () => RsaTestData.Service().EncryptAsync(
-                input, output, UndefinedCipher, null!, null, TestContext.Current.CancellationToken));
+                input, output, UndefinedCipher, null!, RsaOaepHash.Sha256, null,
+                TestContext.Current.CancellationToken));
 
         Assert.Equal("cipher", exception.ParamName);
+    }
+
+    // --- The OAEP hash ------------------------------------------------------------------------------
+
+    private const RsaOaepHash UndefinedOaepHash = (RsaOaepHash)0x7F;
+
+    /// <summary>
+    /// SHA-1 is <b>rejected</b>, not merely discouraged: the format reserves its wire byte and accepts no
+    /// container carrying it (<c>docs/format.md</c> §3.3, §10), so an argument naming it cannot be honoured.
+    /// </summary>
+    [Fact]
+    public async Task Encrypt_Sha1_Throws()
+    {
+        using MemoryStream input = new();
+        using MemoryStream output = new();
+
+        ArgumentOutOfRangeException exception = await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+            () => RsaTestData.Service().EncryptAsync(
+                input, output, Cipher.Aes256Gcm, keys.PublicKeyPem, RsaOaepHash.Sha1, null,
+                TestContext.Current.CancellationToken));
+
+        Assert.Equal("oaepHash", exception.ParamName);
+        Assert.IsAssignableFrom<ArgumentException>(exception);
+    }
+
+    [Fact]
+    public async Task Encrypt_UndefinedOaepHash_Throws()
+    {
+        using MemoryStream input = new();
+        using MemoryStream output = new();
+
+        ArgumentOutOfRangeException exception = await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+            () => RsaTestData.Service().EncryptAsync(
+                input, output, Cipher.Aes256Gcm, keys.PublicKeyPem, UndefinedOaepHash, null,
+                TestContext.Current.CancellationToken));
+
+        Assert.Equal("oaepHash", exception.ParamName);
+    }
+
+    /// <summary>
+    /// Declaration order again: the cipher before the key, and the key before the hash — so a caller who got
+    /// two parameters wrong is told about the first one.
+    /// </summary>
+    [Fact]
+    public async Task ValidationReportsTheFirstFaultyParameterInDeclarationOrder()
+    {
+        using MemoryStream input = new();
+        using MemoryStream output = new();
+
+        Assert.Equal(
+            "cipher",
+            (await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+                () => RsaTestData.Service().EncryptAsync(
+                    input, output, UndefinedCipher, keys.PublicKeyPem, RsaOaepHash.Sha1, null,
+                    TestContext.Current.CancellationToken))).ParamName);
+
+        Assert.Equal(
+            "publicKeyPem",
+            (await Assert.ThrowsAsync<ArgumentException>(
+                () => RsaTestData.Service().EncryptAsync(
+                    input, output, Cipher.Aes256Gcm, string.Empty, RsaOaepHash.Sha1, null,
+                    TestContext.Current.CancellationToken))).ParamName);
+    }
+
+    /// <summary>
+    /// A rejected hash reaches no key and writes nothing: the poisoned RSA factory throws the moment it is
+    /// used, and it is never used.
+    /// </summary>
+    [Fact]
+    public async Task ARejectedOaepHashTouchesNoKeyAndWritesNothing()
+    {
+        RsaDataEncryptionService service = RsaTestData.Service(
+            publicKeyServiceFactory: new PoisonedPublicKeyServiceFactory());
+        using MemoryStream input = new(RsaTestData.Plaintext(64), writable: false);
+        using MemoryStream output = new();
+
+        foreach (RsaOaepHash rejected in new[] { RsaOaepHash.Sha1, UndefinedOaepHash })
+        {
+            await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+                () => service.EncryptAsync(
+                    input, output, Cipher.Aes256Gcm, keys.PublicKeyPem, rejected, null,
+                    TestContext.Current.CancellationToken));
+        }
+
+        Assert.Equal(0, output.Length);
+        Assert.Equal(0, input.Position);
+    }
+
+    // --- The OAEP hash, on the file-path extension ---------------------------------------------------
+
+    /// <summary>
+    /// The extension validates the hash <b>before either file is opened</b>. That ordering is load-bearing:
+    /// the output is <c>FileMode.Create</c>, so validating later would truncate a caller's existing file only
+    /// to delete it again. The assertion is therefore that the pre-existing output file is left intact and
+    /// the never-created one is not created.
+    /// </summary>
+    [Theory]
+    [InlineData(RsaOaepHash.Sha1)]
+    [InlineData(UndefinedOaepHash)]
+    public async Task EncryptFile_RejectsTheHashBeforeOpeningEitherFile(RsaOaepHash rejected)
+    {
+        using TempWorkspace workspace = new();
+        string inputPath = workspace.WriteFile("plaintext.bin", RsaTestData.Plaintext(64));
+        string missingOutputPath = workspace.PathFor("container.bin");
+
+        byte[] existingContent = [0x11, 0x22, 0x33];
+        string existingOutputPath = workspace.WriteFile("existing.bin", existingContent);
+
+        IRsaDataEncryptionService service = RsaTestData.Service(
+            publicKeyServiceFactory: new PoisonedPublicKeyServiceFactory());
+
+        Assert.Equal(
+            "oaepHash",
+            (await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+                () => service.EncryptFileAsync(
+                    inputPath, missingOutputPath, Cipher.Aes256Gcm, keys.PublicKeyPem, rejected,
+                    cancellationToken: TestContext.Current.CancellationToken))).ParamName);
+
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+            () => service.EncryptFileAsync(
+                inputPath, existingOutputPath, Cipher.Aes256Gcm, keys.PublicKeyPem, rejected,
+                cancellationToken: TestContext.Current.CancellationToken));
+
+        Assert.False(File.Exists(missingOutputPath), "The output file was created before the hash was validated.");
+        Assert.Equal(existingContent, File.ReadAllBytes(existingOutputPath));
+    }
+
+    /// <summary>
+    /// A missing input file is not what rejects the call either — the hash is checked before the path is
+    /// even resolved, so the outcome does not depend on the file system at all.
+    /// </summary>
+    [Fact]
+    public async Task EncryptFile_RejectsTheHashEvenWhenTheInputDoesNotExist()
+    {
+        using TempWorkspace workspace = new();
+
+        Assert.Equal(
+            "oaepHash",
+            (await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+                () => RsaTestData.Service().EncryptFileAsync(
+                    workspace.PathFor("no-such-file.bin"),
+                    workspace.PathFor("container.bin"),
+                    Cipher.Aes256Gcm,
+                    keys.PublicKeyPem,
+                    RsaOaepHash.Sha1,
+                    cancellationToken: TestContext.Current.CancellationToken))).ParamName);
     }
 
     // --- Nothing happens before validation ----------------------------------------------------------
@@ -148,11 +301,13 @@ public sealed class RsaArgumentValidationTests(RsaKeyFixture keys)
 
         await Assert.ThrowsAsync<ArgumentException>(
             () => service.EncryptAsync(
-                input, output, Cipher.Aes256Gcm, string.Empty, null, TestContext.Current.CancellationToken));
+                input, output, Cipher.Aes256Gcm, string.Empty, RsaOaepHash.Sha256, null,
+                TestContext.Current.CancellationToken));
 
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
             () => service.EncryptAsync(
-                input, output, UndefinedCipher, keys.PublicKeyPem, null, TestContext.Current.CancellationToken));
+                input, output, UndefinedCipher, keys.PublicKeyPem, RsaOaepHash.Sha256, null,
+                TestContext.Current.CancellationToken));
 
         Assert.Equal(0, output.Length);
         Assert.Equal(0, input.Position);
@@ -201,7 +356,8 @@ public sealed class RsaArgumentValidationTests(RsaKeyFixture keys)
         using MemoryStream input = new(plaintext, writable: false);
         using MemoryStream container = new();
         await service.EncryptAsync(
-            input, container, Cipher.Aes256Gcm, keys.PublicKeyPem, null, TestContext.Current.CancellationToken);
+            input, container, Cipher.Aes256Gcm, keys.PublicKeyPem, RsaOaepHash.Sha256, null,
+            TestContext.Current.CancellationToken);
 
         container.Position = 0;
         using MemoryStream recovered = new();

@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.IO;
 using System.Security.Cryptography;
 using System.Threading.Tasks;
+using Enigma.DataEncryption.Internal;
 using Enigma.DataEncryption.UnitTests.Internal;
 using Xunit;
 
@@ -210,6 +211,38 @@ public sealed class MalformedContainerSweepTests
 
         await AssertContainerErrorAsync(
             kind, FormatTestData.WithByteAt(container, MLKemTestData.ParameterSetOffset, value));
+    }
+
+    // --- RSA OAEP hash (§3.3) ----------------------------------------------------------------------
+
+    /// <summary>
+    /// Every OAEP-hash byte other than the one written — the two other valid ones included, since a
+    /// switched hash changes what the unwrap expects rather than what the parser accepts, and the reserved
+    /// <c>0x01</c> too. Only method <c>0x03</c> carries the byte; it shares offset 5 with the parameter set
+    /// of the two methods above, which is why the sweep asserts a container error rather than a specific
+    /// exception type — an edited selector may be caught by the parser, by OAEP or by the AAD depending on
+    /// the value, and all three are documented outcomes.
+    /// </summary>
+    public static TheoryData<byte> EveryForeignOaepHashByte()
+    {
+        TheoryData<byte> data = [];
+        for (int value = 0x00; value <= 0xFF; value++)
+        {
+            if ((byte)value != RsaOaepHashWire.Sha256Byte) data.Add((byte)value);
+        }
+
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(EveryForeignOaepHashByte))]
+    public async Task AnEditedRsaOaepHashByteIsAContainerError(byte value)
+    {
+        byte[] container = await ContainerAsync(ContainerMethodKind.Rsa);
+
+        await AssertContainerErrorAsync(
+            ContainerMethodKind.Rsa,
+            FormatTestData.WithByteAt(container, RsaTestData.OaepHashOffset, value));
     }
 
     // --- Cost and length fields (§8) ---------------------------------------------------------------

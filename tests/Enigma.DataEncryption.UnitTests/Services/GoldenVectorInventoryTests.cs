@@ -4,6 +4,8 @@ using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using Enigma.Core.Asymmetric.Pqc;
+using Enigma.Core.Asymmetric.PublicKey;
+using Enigma.DataEncryption.Internal;
 using Enigma.DataEncryption.UnitTests.Internal;
 using Xunit;
 
@@ -76,13 +78,22 @@ public sealed class GoldenVectorInventoryTests
             + "the §9 rule that an undecryptable PEM is a DataDecryptionException."),
         new("rsa-aes.bin", FixtureRole.Container,
             "RSA · AES-256-GCM · data key 00–1F · nonce 00–0B · wrapped under rsa-2048-public.pem with "
-            + "RSAES-OAEP-SHA256. The 256 wrapped-key bytes are OAEP-randomized and cannot be pinned; every "
-            + "other byte is asserted exactly.",
-            ContainerMethodKind.Rsa),
+            + "RSAES-OAEP-SHA256, the default hash, recorded as 0x02 at offset 5. The 256 wrapped-key bytes "
+            + "are OAEP-randomized and cannot be pinned; every other byte is asserted exactly.",
+            ContainerMethodKind.Rsa, OaepHash: RsaOaepHash.Sha256),
         new("rsa-twofish.bin", FixtureRole.Container,
             "The same inputs under Twofish-256-GCM — a regression vector for the payload, independent for "
             + "the header.",
-            ContainerMethodKind.Rsa),
+            ContainerMethodKind.Rsa, OaepHash: RsaOaepHash.Sha256),
+        new("rsa-aes-sha384.bin", FixtureRole.Container,
+            "The rsa-aes.bin inputs wrapped under RSAES-OAEP-SHA384 instead (offset 5 = 0x03). The hash is a "
+            + "header field, so pinning only the default would leave two thirds of its accepted range "
+            + "unpinned on the read path.",
+            ContainerMethodKind.Rsa, OaepHash: RsaOaepHash.Sha384),
+        new("rsa-aes-sha512.bin", FixtureRole.Container,
+            "The same, under RSAES-OAEP-SHA512 (offset 5 = 0x04). N is unchanged at 256 bytes: the hash "
+            + "changes the padding, not the modulus.",
+            ContainerMethodKind.Rsa, OaepHash: RsaOaepHash.Sha512),
 
         // --- Method 0x04 — ML-KEM ------------------------------------------------------------------
         new("mlkem-512-public.key", FixtureRole.Credential,
@@ -231,6 +242,13 @@ public sealed class GoldenVectorInventoryTests
             Assert.Equal(
                 MLKemTestData.WireByteOf(parameterSet), container[MLKemTestData.ParameterSetOffset]);
         }
+
+        // Method 0x03 puts its OAEP-hash byte at the same offset 5, so the two are mutually exclusive.
+        if (record.OaepHash is { } oaepHash)
+        {
+            Assert.Equal(
+                RsaOaepHashWire.ToWireByte(oaepHash), container[RsaTestData.OaepHashOffset]);
+        }
     }
 
     /// <summary>
@@ -330,5 +348,6 @@ public sealed class GoldenVectorInventoryTests
         string Description,
         ContainerMethodKind? Method = null,
         MLKemParameterSet? ParameterSet = null,
-        string? KeySlug = null);
+        string? KeySlug = null,
+        RsaOaepHash? OaepHash = null);
 }

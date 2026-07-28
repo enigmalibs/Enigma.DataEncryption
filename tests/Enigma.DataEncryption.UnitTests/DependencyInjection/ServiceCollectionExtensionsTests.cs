@@ -178,7 +178,8 @@ public sealed class ServiceCollectionExtensionsTests
 
         await AssertRoundTripAsync(
             EncryptionMethod.Rsa,
-            (i, o) => rsa.EncryptAsync(i, o, Cipher.Serpent256Gcm, RsaTestData.GoldenPublicKeyPem(), null, token),
+            (i, o) => rsa.EncryptAsync(
+                i, o, Cipher.Serpent256Gcm, RsaTestData.GoldenPublicKeyPem(), RsaOaepHash.Sha256, null, token),
             (i, o) => rsa.DecryptAsync(
                 i, o, RsaTestData.GoldenPrivateKeyPem(), null, null, null, token));
 

@@ -22,8 +22,10 @@ cryptographic primitive; BouncyCastle backs Enigma.Core but never appears on thi
 - **Password-based encryption** — `IPbkdf2DataEncryptionService` (PBKDF2-HMAC-SHA256) and
   `IArgon2DataEncryptionService` (Argon2id v1.3, memory-hard and recommended for new work), each taking a
   `byte[]` or `char[]` password and writing its cost parameters into the header.
-- **RSA encryption** — `IRsaDataEncryptionService` transports the data key under RSAES-OAEP-SHA256, taking
-  PEM-encoded keys directly, including password-protected private-key PEMs.
+- **RSA encryption** — `IRsaDataEncryptionService` transports the data key under RSAES-OAEP with a
+  selectable padding hash (SHA-256, SHA-384 or SHA-512; SHA-1 rejected), recorded in the header so the
+  reader needs no hash argument. Takes PEM-encoded keys directly, including password-protected
+  private-key PEMs.
 - **Post-quantum ML-KEM encryption** — `IMLKemDataEncryptionService` establishes the data key by ML-KEM key
   encapsulation (FIPS 203) at parameter set 512, 768 or 1024.
 - **True RSA + ML-KEM hybrid** — `IHybridDataEncryptionService` transports a secret under **each** primitive

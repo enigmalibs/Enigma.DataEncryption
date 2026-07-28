@@ -1,6 +1,6 @@
 # FEATURE-0D64 — Selectable RSA-OAEP hash for method `0x03`
 
-**Status:** TODO
+**Status:** DONE
 **Type:** FEATURE (single-phase)
 **Suggested branch:** `feature/feature-0d64-rsa-oaep-hash`
 **Depends on:** FEATURE-11B6 (complete), FEATURE-5A30 (build it first — see *Ordering* below)
