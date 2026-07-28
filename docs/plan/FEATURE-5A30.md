@@ -1,9 +1,15 @@
-# FEATURE-5A30 — True hybrid RSA + ML-KEM method `0x05` (deferred)
+# FEATURE-5A30 — True hybrid RSA + ML-KEM method `0x05`
 
-**Status:** TODO — **deliberately deferred; not part of the v1.0.0 release**
+**Status:** TODO — **now part of v1.0.0; first of the three pre-release items**
 **Type:** FEATURE (single-phase)
 **Suggested branch:** `feature/feature-5a30-hybrid`
 **Depends on:** FEATURE-11B6 (complete)
+**Followed by:** FEATURE-0D64, then FEATURE-F612 (the audit, which must see this method finished)
+
+> **Deferral rescinded.** This item was planned as deliberately deferred and out of v1.0.0's scope. It
+> is now the **first** of the three items the release waits for — `FEATURE-5A30` → `FEATURE-0D64` →
+> `FEATURE-F612` → the `CODE-REVIEW` item minted from the audit → publish. `docs/roadmap.md` is
+> authoritative; the paragraph below is kept for the reasoning it records, not for its scope claim.
 
 ## Why this exists as a planned item
 
@@ -17,9 +23,11 @@ A **true hybrid** wraps the data key under both, combining the two secrets so th
 long as **either** primitive holds. That is what NIST and IETF post-quantum migration guidance actually
 recommend for the transition period, and it is the strongest option this library could offer.
 
-It is deferred to keep v1.0.0's scope exactly where it was set. Method byte **`0x05` is reserved for it
-in `docs/format.md`** from FEATURE-00E7 onward, so adding it later needs no format-version bump and no
-awkward byte allocation.
+It was originally deferred to keep v1.0.0's scope exactly where it was set; that scope has since been
+widened to include it, so the strongest option the library can offer ships in the first release rather
+than after it. Method byte **`0x05` is reserved for it in `docs/format.md`** from FEATURE-00E7 onward,
+so it needs no format-version bump and no awkward byte allocation — and because v1.0.0 is prepared but
+**not published**, no container exists outside this repository for the new method to be compatible with.
 
 ## Objective
 

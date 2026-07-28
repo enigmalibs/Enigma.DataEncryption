@@ -4,7 +4,10 @@ Guidance for Claude Code (and other AI agents) working in this repository.
 
 ## Current state
 
-**The library is functionally complete; what remains is the release.** `FEATURE-67FD` stood up the git
+**The four implemented methods are functionally complete. Three planned items now stand between the
+library and the release** — `FEATURE-5A30` (the hybrid method `0x05`), `FEATURE-0D64` (a selectable RSA-OAEP
+hash) and `FEATURE-F612` (a full adversarial audit, whose findings become a `CODE-REVIEW` item). See
+*Dev workflow* below; `docs/roadmap.md` is authoritative. `FEATURE-67FD` stood up the git
 repo, the root configuration, the multi-targeted library and an MTP-native xUnit v3 test project.
 `FEATURE-00E7` then added the normative format spec (`docs/format.md`) and the **complete public API
 surface** — enums, constants, limits, the header record, the exception hierarchy, five service interfaces
@@ -80,7 +83,12 @@ Four encryption **methods**, one service each, plus an inspector:
 | ML-KEM | `0x04` | `IMLKemDataEncryptionService` | ML-KEM key pair (raw bytes) |
 
 `IEncryptedDataInspector` reads a container's header without decrypting it. `0x05` is **reserved**
-for a true RSA + ML-KEM hybrid (`FEATURE-5A30`, deferred).
+for a true RSA + ML-KEM hybrid (`FEATURE-5A30`, now part of v1.0.0 and the next item to build).
+
+Method `0x03`'s wrapping hash is **fixed at OAEP-SHA-256 today and becomes a header field** in
+`FEATURE-0D64` (SHA-256/384/512; SHA-1 rejected, its wire byte reserved). Until that item lands,
+`docs/format.md` §4 is correct as written — treat the plan, not the spec, as the description of the
+future state.
 
 Every method derives or transports a 32-byte data key, then encrypts the payload with a
 **256-bit AEAD block cipher in GCM mode** (AES / Twofish / Serpent / Camellia), passing the
@@ -157,6 +165,7 @@ docs/RELEASE.md                      Release runbook (FEATURE-07DA PHASE04) — 
 docs/roadmap.md                      Work-item registry
 docs/plan/                           Per-item plans
 docs/done/                           Per-dev completion records
+docs/review/                         Audit findings reports — does not exist yet; created by FEATURE-F612 (repo-only, not packed)
 ```
 
 Note the folders under `src/` are **organisational only** — every public type lives in the flat
@@ -240,9 +249,18 @@ plan's acceptance criteria are met, the roadmap/plan statuses are updated, and t
 written. Commits are left to the maintainer.
 
 The sequence is a hard dependency chain: `FEATURE-67FD` (done) → `FEATURE-00E7` (done — format spec +
-API skeleton) → `FEATURE-11B6` (done — all five phases) → **`FEATURE-07DA` (done — all four phases;
-v1.0.0 is prepared but *not published*, so the one step left is the maintainer running
-`docs/RELEASE.md`)**. `FEATURE-5A30` (hybrid method `0x05`) is deferred by design and is not part of
-v1.0.0. `FEATURE-136E` (legacy decrypt) is **`ABANDONED`** — the predecessor-file migration need never
+API skeleton) → `FEATURE-11B6` (done — all five phases) → `FEATURE-07DA` (done — all four phases; the
+package, the docs and the runbook are prepared) → **`FEATURE-5A30`** (hybrid method `0x05`) →
+**`FEATURE-0D64`** (selectable RSA-OAEP hash) → **`FEATURE-F612`** (adversarial audit, report only) →
+the **`CODE-REVIEW`** item minted from that report → the maintainer runs `docs/RELEASE.md`.
+
+**v1.0.0 is prepared but *not published*, and the release now waits on those items** — do not treat the
+library as one step from shipping. That the release has not happened is also what keeps `FEATURE-0D64`
+cheap: no container exists outside this repository, so the `0x03` header shape can still change with no
+format-version bump. `FEATURE-F612` is deliberately **last**, so it audits the code that actually ships,
+and it is under a hard code freeze — it writes findings to `docs/review/`, fixes nothing.
+
+`FEATURE-136E` (legacy decrypt) is **`ABANDONED`** — the predecessor-file migration need never
 materialized — though format versions `0x01`–`0x0F` stay reserved, so it could return as a new item
-without a redesign. `docs/roadmap.md` is authoritative for current status.
+without a redesign. Bringing back the predecessor's PKCS#1 v1.5 key wrapping is **not** planned either;
+`FEATURE-0D64` records why. `docs/roadmap.md` is authoritative for current status.
