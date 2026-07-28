@@ -149,6 +149,7 @@ tests/Enigma.DataEncryption.UnitTests/   xUnit v3 test suite
                                      matrix, cancellation, golden vectors, key clearing) +
                                      Fixtures/ — committed containers & expected plaintext
 docs/format.md                       Normative binary-format specification (the contract)
+docs/guides/                         Per-category usage guides + index (README.md) — repo-only, not packed
 docs/roadmap.md                      Work-item registry
 docs/plan/                           Per-item plans
 docs/done/                           Per-dev completion records
@@ -204,8 +205,14 @@ Tests are **MTP-native**: `xunit.v3` + `coverlet.collector`, with **no** `Micros
 - **Public surface.** Never expose a BouncyCastle type publicly. Reuse Enigma.Core's public types
   (e.g. `MLKemParameterSet`) rather than defining duplicates.
 - **Documentation.** Public APIs carry XML doc comments (`GenerateDocumentationFile=true`), so a
-  missing comment fails the build. Per-category usage guides will live under `docs/guides/`
-  (`FEATURE-07DA`).
+  missing comment fails the build. Per-category usage guides live under `docs/guides/`, indexed by
+  `docs/guides/README.md` (`FEATURE-07DA` PHASE02) — six guides, one per category, plus the index. They
+  are **usage**; `docs/format.md` remains the spec, and no wire-format table is duplicated into them.
+  Every snippet is verified against the real public surface of *both* this library and Enigma.Core;
+  there is no permanent doc-sample test project, so that gate is a per-dev obligation, not a build step.
+  Two constraints the guides depend on: they are **repo-only and never packed**, so their relative links
+  (including `../format.md`) are correct as written and must not become absolute URLs — and the packed
+  root `README.md` must therefore point at them in prose, with no clickable `docs/…` link.
 - **Packaging metadata.** All 12 NuGet properties are now present in the library csproj
   (`FEATURE-07DA` PHASE01), together with the `None` `ItemGroup` that packs `README.md` and
   `LICENSE.md`. Two omissions there are deliberate, not oversights: **`GeneratePackageOnBuild` is
@@ -229,6 +236,6 @@ written. Commits are left to the maintainer.
 
 The sequence is a hard dependency chain: `FEATURE-67FD` (done) → `FEATURE-00E7` (done — format spec +
 API skeleton) → `FEATURE-11B6` (done — all five phases) → **`FEATURE-07DA` (in progress — v1.0.0
-release, 4 phases; PHASE01 done, PHASE02 next)**. `FEATURE-136E` (legacy decrypt) and `FEATURE-5A30`
+release, 4 phases; PHASE01–02 done, PHASE03 next)**. `FEATURE-136E` (legacy decrypt) and `FEATURE-5A30`
 (hybrid method) are deferred by design and are not part of v1.0.0. `docs/roadmap.md` is authoritative
 for current status.

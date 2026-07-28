@@ -112,7 +112,7 @@ is first-release only.
 
 ## PHASE02 — Per-category guides & index
 
-**Status:** TODO
+**Status:** DONE — see `docs/done/FEATURE-07DA-PHASE02.md`
 
 ### Guides — `docs/guides/`
 
