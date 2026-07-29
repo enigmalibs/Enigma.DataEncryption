@@ -25,7 +25,7 @@ Status vocabulary: `TODO`, `IN PROGRESS`, `DONE`, `ABANDONED`.
 | FEATURE-0D64 | Selectable RSA-OAEP hash for method `0x03`                 | DONE   | docs/plan/FEATURE-0D64.md |
 | FEATURE-F612 | Full adversarial pre-release audit (report only)           | IN PROGRESS | docs/plan/FEATURE-F612.md |
 | - PHASE01    | Cryptographic & security correctness                       | DONE   | (in FEATURE-F612.md)      |
-| - PHASE02    | `docs/format.md` conformance                               | TODO   | (in FEATURE-F612.md)      |
+| - PHASE02    | `docs/format.md` conformance                               | DONE   | (in FEATURE-F612.md)      |
 | - PHASE03    | Test-suite quality & coverage gaps                         | TODO   | (in FEATURE-F612.md)      |
 | - PHASE04    | Public API, documentation & packaging                      | TODO   | (in FEATURE-F612.md)      |
 | - PHASE05    | Synthesis, severity calibration & triage handoff           | TODO   | (in FEATURE-F612.md)      |

@@ -191,7 +191,7 @@ with the commit SHA.
 
 ## PHASE02 — `docs/format.md` conformance
 
-**Status:** TODO
+**Status:** DONE — 9 findings admitted (2 Medium, 7 Low), 9 refuted; see `docs/review/FEATURE-F612.md`
 **Suggested branch:** `feature/feature-f612-phase02-format`
 **Slice:** `docs/format.md` against `Internal/` (writer, reader, layout, wire mappings, validators),
 `EncryptedDataHeader.cs`, `Cipher.cs`, `EncryptionMethod.cs`, `Api/FormatConstantsTests.cs`
