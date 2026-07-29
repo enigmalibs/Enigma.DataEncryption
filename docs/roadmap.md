@@ -23,8 +23,8 @@ Status vocabulary: `TODO`, `IN PROGRESS`, `DONE`, `ABANDONED`.
 | FEATURE-136E | Legacy decrypt support for predecessor files               | ABANDONED — the predecessor-file migration need never materialized; no replacement item (format versions `0x01`–`0x0F` stay reserved) | docs/plan/FEATURE-136E.md |
 | FEATURE-5A30 | True hybrid RSA + ML-KEM method `0x05`                     | DONE   | docs/plan/FEATURE-5A30.md |
 | FEATURE-0D64 | Selectable RSA-OAEP hash for method `0x03`                 | DONE   | docs/plan/FEATURE-0D64.md |
-| FEATURE-F612 | Full adversarial pre-release audit (report only)           | TODO   | docs/plan/FEATURE-F612.md |
-| - PHASE01    | Cryptographic & security correctness                       | TODO   | (in FEATURE-F612.md)      |
+| FEATURE-F612 | Full adversarial pre-release audit (report only)           | IN PROGRESS | docs/plan/FEATURE-F612.md |
+| - PHASE01    | Cryptographic & security correctness                       | DONE   | (in FEATURE-F612.md)      |
 | - PHASE02    | `docs/format.md` conformance                               | TODO   | (in FEATURE-F612.md)      |
 | - PHASE03    | Test-suite quality & coverage gaps                         | TODO   | (in FEATURE-F612.md)      |
 | - PHASE04    | Public API, documentation & packaging                      | TODO   | (in FEATURE-F612.md)      |

@@ -1,6 +1,6 @@
 # FEATURE-F612 — Full adversarial pre-release audit (report only)
 
-**Status:** TODO
+**Status:** IN PROGRESS
 **Type:** FEATURE (5 phases — four review dimensions plus synthesis)
 **Depends on:** FEATURE-5A30 **and** FEATURE-0D64 — both must be complete before PHASE01 starts
 **Deliverable:** `docs/review/FEATURE-F612.md` — findings only; **no code, docs or config change**
@@ -143,7 +143,7 @@ Observation. Anything about line endings is an Observation by house rule, never 
 
 ## PHASE01 — Cryptographic & security correctness
 
-**Status:** TODO
+**Status:** DONE — 10 findings admitted (3 Medium, 7 Low), 10 refuted; see `docs/review/FEATURE-F612.md`
 **Suggested branch:** `feature/feature-f612-phase01-crypto`
 **Slice:** `src/Enigma.DataEncryption/Services/`, `src/Enigma.DataEncryption/Internal/`,
 `Exceptions/`, `DataEncryptionDefaults.cs`, `DataEncryptionLimits.cs`
