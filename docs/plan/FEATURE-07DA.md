@@ -1,6 +1,6 @@
 # FEATURE-07DA — NuGet release preparation (v1.0.0)
 
-**Status:** TODO
+**Status:** DONE (all four phases)
 **Type:** FEATURE (4 phases — the `dotnet-release` **first release** shape)
 **Depends on:** FEATURE-11B6 (complete)
 
@@ -39,7 +39,7 @@ writing it first means writing it twice.
 
 ## PHASE01 — Package metadata & build config + license audit
 
-**Status:** TODO
+**Status:** DONE — see `docs/done/FEATURE-07DA-PHASE01.md`
 
 ### Package metadata — all 12 properties in `src/Enigma.DataEncryption/Enigma.DataEncryption.csproj`
 
@@ -112,7 +112,7 @@ is first-release only.
 
 ## PHASE02 — Per-category guides & index
 
-**Status:** TODO
+**Status:** DONE — see `docs/done/FEATURE-07DA-PHASE02.md`
 
 ### Guides — `docs/guides/`
 
@@ -173,7 +173,7 @@ and it is **not** required here.
 
 ## PHASE03 — README + release notes + community files
 
-**Status:** TODO
+**Status:** DONE — see `docs/done/FEATURE-07DA-PHASE03.md`
 
 ### `README.md` (repo root — **packed**, and the nuget.org landing page)
 
@@ -258,7 +258,7 @@ Update property 11 in the csproj to prose mirroring the top of `RELEASENOTES.md`
 
 ## PHASE04 — Release runbook, pack-verify & final cut prep
 
-**Status:** TODO
+**Status:** DONE — see `docs/done/FEATURE-07DA-PHASE04.md`
 
 ### `docs/RELEASE.md`
 

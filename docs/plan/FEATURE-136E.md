@@ -1,6 +1,24 @@
-# FEATURE-136E — Legacy decrypt support for Enigma.Cryptography.DataEncryption files (deferred)
+# FEATURE-136E — Legacy decrypt support for Enigma.Cryptography.DataEncryption files (abandoned)
 
-**Status:** TODO — **deliberately deferred; not part of the v1.0.0 release**
+> **ABANDONED — 2026-07-28.** The predecessor-file migration need this item existed for never
+> materialized: v1.0.0 ships new-format-only, and no consumer of
+> `Enigma.Cryptography.DataEncryption` has to be carried across. **No replacement item** — nothing
+> supersedes this and no follow-up is planned. The row in `docs/roadmap.md` and this file are kept
+> deliberately, per `dev-workflow`'s *Abandoning or changing direction* rule, so the decision and the
+> research behind it are not lost.
+>
+> **The door stays open architecturally.** `docs/format.md` still reserves format-version bytes
+> `0x01`–`0x0F` for predecessor files, and the header reader still dispatches on the version byte — so
+> if the need ever appears, this remains an *addition*, not a redesign, and no shipped format decision
+> has to be undone to allow it.
+>
+> **The plan below is left intact on purpose.** The predecessor layout tables and the
+> "verify, don't assume" table are reverse-engineering work with real value; whoever revives this
+> should re-read them (and re-verify every row against the actual package) rather than re-derive them
+> from scratch. Note that reviving it means a **new work item** — per the skill, an `ABANDONED` item is
+> never brought back to `TODO`.
+
+**Status:** ABANDONED — migration need never materialized; no replacement item
 **Type:** FEATURE (single-phase)
 **Suggested branch:** `feature/feature-136e-legacy-reader`
 **Depends on:** FEATURE-11B6 (complete)
@@ -18,6 +36,7 @@ header (no AAD), no key-confirmation tag, PKCS#1 v1.5 RSA unwrap, ML-KEM fixed a
 need that did not exist when the plan was made.
 
 **If that need never materializes, mark this `ABANDONED` with a reason rather than deleting the row.**
+— That is what happened; see the note at the top of this file.
 
 ## Objective
 
