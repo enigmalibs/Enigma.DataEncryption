@@ -267,8 +267,9 @@ catch (DataDecryptionException ex)
 
 **When both keys are wrong, the RSA failure is the one reported** — that half runs first. And on the
 encrypt side the two halves differ again: an unusable RSA public-key PEM propagates from Enigma.Core as
-`ArgumentException` or `FormatException`, while an unusable ML-KEM public key becomes an
-`ArgumentException` on `mlKemPublicKey`.
+`ArgumentException` — invalid Base64 included, since Enigma.Core 1.1.0 no longer lets a bare
+`FormatException` escape for that case, though the format specification still permits one — while an
+unusable ML-KEM public key becomes an `ArgumentException` on `mlKemPublicKey`.
 
 > **One wrinkle about parameter names.** Because an unparseable PEM propagates unwrapped, the
 > `ParamName` in that case is Enigma.Core's `publicKeyPem` / `privateKeyPem` rather than this method's

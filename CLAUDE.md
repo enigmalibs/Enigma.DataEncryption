@@ -261,6 +261,15 @@ Note the `--solution` flag: on the .NET 10 SDK in MTP mode, `dotnet test <Soluti
 Tests are **MTP-native**: `xunit.v3` + `coverlet.collector`, with **no** `Microsoft.NET.Test.Sdk` and
 **no** `xunit.runner.visualstudio` — both break the Microsoft Testing Platform.
 
+**The test host is pinned to MTP *v1*, and one package must not be bumped past it.** `xunit.v3` 3.2.2
+ships `xunit.v3.core.mtp-v1` and pulls `Microsoft.Testing.Platform.MSBuild` 1.9.1, so
+`Microsoft.Testing.Extensions.CodeCoverage` is capped at the **18.0.x** line (18.0.6) — 18.1.0 and later
+depend on `Microsoft.Testing.Platform` 2.x. The pairing fails in a way that is easy to misread as success:
+the solution **builds clean with zero warnings**, then the test host dies at startup with
+`TypeLoadException: … 'IDataConsumer' …` and **zero tests run** on both TFMs. `FEATURE-4A67` PHASE01 hit
+this; the constraint is also recorded as a comment in `Directory.Packages.props`. Lifting it needs
+`xunit.v3` 4.x, which is prerelease as of 2026-08-01 — the two move together.
+
 ## Conventions
 
 - **Language/style.** C# 14, `Nullable=enable`, `ImplicitUsings=disable` (declare `using`s

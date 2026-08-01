@@ -29,8 +29,8 @@ Status vocabulary: `TODO`, `IN PROGRESS`, `DONE`, `ABANDONED`.
 | - PHASE03    | Test-suite quality & coverage gaps                         | TODO   | (in FEATURE-F612.md)      |
 | - PHASE04    | Public API, documentation & packaging                      | TODO   | (in FEATURE-F612.md)      |
 | - PHASE05    | Synthesis, severity calibration & triage handoff           | TODO   | (in FEATURE-F612.md)      |
-| FEATURE-4A67 | Enigma.Core 1.1.0 upgrade & v1.1.0 release                  | TODO   | docs/plan/FEATURE-4A67.md |
-| - PHASE01    | Upgrade to Enigma.Core 1.1.0 & verify                      | TODO   | (in FEATURE-4A67.md)      |
+| FEATURE-4A67 | Enigma.Core 1.1.0 upgrade & v1.1.0 release                  | IN PROGRESS | docs/plan/FEATURE-4A67.md |
+| - PHASE01    | Upgrade to Enigma.Core 1.1.0 & verify                      | DONE   | (in FEATURE-4A67.md)      |
 | - PHASE02    | Release v1.1.0                                             | TODO   | (in FEATURE-4A67.md)      |
 
 ## Notes on ordering
