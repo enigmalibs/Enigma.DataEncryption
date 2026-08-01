@@ -29,6 +29,9 @@ Status vocabulary: `TODO`, `IN PROGRESS`, `DONE`, `ABANDONED`.
 | - PHASE03    | Test-suite quality & coverage gaps                         | TODO   | (in FEATURE-F612.md)      |
 | - PHASE04    | Public API, documentation & packaging                      | TODO   | (in FEATURE-F612.md)      |
 | - PHASE05    | Synthesis, severity calibration & triage handoff           | TODO   | (in FEATURE-F612.md)      |
+| FEATURE-4A67 | Enigma.Core 1.1.0 upgrade & v1.1.0 release                  | TODO   | docs/plan/FEATURE-4A67.md |
+| - PHASE01    | Upgrade to Enigma.Core 1.1.0 & verify                      | TODO   | (in FEATURE-4A67.md)      |
+| - PHASE02    | Release v1.1.0                                             | TODO   | (in FEATURE-4A67.md)      |
 
 ## Notes on ordering
 
@@ -75,3 +78,10 @@ happened. The row and the plan file stay for the record. Nothing supersedes it, 
 architecturally — `docs/format.md` still reserves format-version bytes `0x01`–`0x0F` for predecessor
 files and the header reader still dispatches on the version byte — so a future item could add a legacy
 reader as an addition rather than a redesign.
+
+`FEATURE-4A67` is appended last per the house append-last rule, but it is **the next item to build** — it
+does not wait on `FEATURE-F612`. The two are independent: `4A67` moves the runtime dependency to
+Enigma.Core 1.1.0 (BouncyCastle 2.7.0) and cuts v1.1.0, while `F612` audits the code and fixes nothing; its
+findings mint a `CODE-REVIEW` item whose fixes ship in a later 1.x. `docs/plan/FEATURE-4A67.md` decision 1
+records the reasoning, and decision 9 records that the two will conflict in this file's prose and that the
+conflict is resolved at merge time.
