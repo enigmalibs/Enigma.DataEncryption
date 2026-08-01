@@ -347,8 +347,9 @@ public sealed class HybridDataEncryptionService : IHybridDataEncryptionService
     /// failure — a wrong private key, a wrongly-passworded PEM, an encrypted PEM with no passphrase —
     /// becomes a <see cref="DataDecryptionException"/> with the cause preserved, because Enigma.Core
     /// reports all of them identically; while a PEM that cannot be <i>parsed</i> keeps its own
-    /// <see cref="ArgumentException"/> or <see cref="FormatException"/> and propagates untouched
-    /// (<c>docs/format.md</c> §9).
+    /// <see cref="ArgumentException"/> and propagates untouched (<c>docs/format.md</c> §9, which also
+    /// permits <see cref="FormatException"/> — the type Enigma.Core raised for an invalid-Base64 PEM
+    /// before 1.1.0, and now nests inside the <see cref="ArgumentException"/> instead).
     /// </para>
     /// <para>
     /// The length check matters here for the same reason it does for method <c>0x03</c>: a sender holding

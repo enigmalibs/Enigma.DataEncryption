@@ -1,6 +1,6 @@
 # FEATURE-4A67 — Enigma.Core 1.1.0 upgrade & v1.1.0 release
 
-**Status:** TODO (multi-phase)
+**Status:** DONE (multi-phase)
 **Type:** FEATURE (multi-phase, 2 phases)
 **Branch (per phase, at build time):** `feature/feature-4a67-phaseNN-<slug>` — one branch per phase,
 cut from the current `HEAD`.
@@ -172,7 +172,7 @@ Standard `dev-workflow` DoD:
 
 ## PHASE01 — Upgrade to Enigma.Core 1.1.0 & verify
 
-**Status:** TODO
+**Status:** DONE — see `docs/done/FEATURE-4A67-PHASE01.md`
 **Branch:** `feature/feature-4a67-phase01-enigma-core-110`
 
 ### Scope
@@ -181,7 +181,7 @@ Standard `dev-workflow` DoD:
 
 | File | Change |
 |---|---|
-| `Directory.Packages.props` | `Enigma.Core` 1.0.0 → **1.1.0**; `coverlet.collector` 6.0.4 → **10.0.1**; `Microsoft.Testing.Extensions.CodeCoverage` 18.0.4 → **18.9.0** |
+| `Directory.Packages.props` | `Enigma.Core` 1.0.0 → **1.1.0**; `coverlet.collector` 6.0.4 → **10.0.1**; `Microsoft.Testing.Extensions.CodeCoverage` 18.0.4 → **18.0.6** (amended at build time from 18.9.0 — see the note below) |
 | `tests/…/Services/RsaFailureTests.cs` | 2 tests: `FormatException` assertion → `ArgumentException` + `ParamName` |
 | `tests/…/Services/HybridFailureTests.cs` | 2 tests: same |
 | `src/…/Services/IRsaDataEncryptionService.cs` | reword the `<exception>` clause that promises `FormatException` for invalid Base64 |
@@ -264,8 +264,19 @@ Standard `dev-workflow` DoD:
 ### Acceptance criteria
 
 1. `Directory.Packages.props` pins `Enigma.Core` **1.1.0**, `coverlet.collector` **10.0.1** and
-   `Microsoft.Testing.Extensions.CodeCoverage` **18.9.0**; `Microsoft.Extensions.DependencyInjection` and
+   `Microsoft.Testing.Extensions.CodeCoverage` **18.0.6**; `Microsoft.Extensions.DependencyInjection` and
    `.Abstractions` remain at **9.0.18**; no `Version=` attribute appears on any `PackageReference`.
+
+   > **Amended at build time (2026-08-01), with the maintainer's agreement.** This criterion originally
+   > required `Microsoft.Testing.Extensions.CodeCoverage` **18.9.0**, which is **incompatible with
+   > `xunit.v3` 3.2.2**: 18.9.0 depends on `Microsoft.Testing.Platform` ≥ 2.3.0, while xunit.v3 3.2.2 is an
+   > MTP *v1* host (`xunit.v3.core.mtp-v1`, `Microsoft.Testing.Platform.MSBuild` 1.9.1). The pairing builds
+   > with zero warnings and then dies at test-host startup —
+   > `TypeLoadException: Could not load type '…TestHost.IDataConsumer' from assembly
+   > 'Microsoft.Testing.Platform, Version=2.3.0.0'`, **zero tests ran on both TFMs**. The whole 18.1.0+ line
+   > requires MTP 2.x; **18.0.6** is the highest release still on MTP 1.8.4, and it was verified green.
+   > Reaching 18.9.0 needs xunit.v3 4.x, which is prerelease only — recorded as a follow-up for a later
+   > release. The planning-time probe evidently did not resolve 18.9.0.
 2. `dotnet build Enigma.DataEncryption.slnx -c Release` succeeds with **0 warnings** on `netstandard2.0`,
    `net8.0` and `net10.0`.
 3. The full suite passes on **net8.0 and net10.0** with **0 failures**. The total stays at **28,272** — the
@@ -293,7 +304,7 @@ Standard `dev-workflow` DoD:
 
 ## PHASE02 — Release v1.1.0
 
-**Status:** TODO
+**Status:** DONE — see `docs/done/FEATURE-4A67-PHASE02.md`
 **Branch:** `feature/feature-4a67-phase02-release-110`
 
 Follows `dotnet-release`'s **routine release** path (a published version already exists): version, notes,

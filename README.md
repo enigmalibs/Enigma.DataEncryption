@@ -13,8 +13,8 @@ salt, costs and cipher choice into the header, so decryption needs nothing but t
 credential. It is built on [Enigma.Core](https://www.nuget.org/packages/Enigma.Core), which supplies every
 cryptographic primitive; BouncyCastle backs Enigma.Core but never appears on this library's public surface.
 
-> **What's new in 1.0** — first release: five credential types including post-quantum ML-KEM and a true
-> RSA + ML-KEM hybrid, over one authenticated, key-committing container format. See
+> **What's new in 1.1** — now built on Enigma.Core 1.1.0, raising the BouncyCastle.Cryptography floor to
+> 2.7.0. No API change and no format change: every container written by 1.0.0 decrypts unchanged. See
 > [RELEASENOTES.md](RELEASENOTES.md).
 
 ## Features
@@ -61,7 +61,7 @@ be shared across an application.
 dotnet add package Enigma.DataEncryption
 ```
 
-Targets **.NET Standard 2.0**, **.NET 8.0**, and **.NET 10.0**; built on Enigma.Core 1.0.0.
+Targets **.NET Standard 2.0**, **.NET 8.0**, and **.NET 10.0**; built on Enigma.Core 1.1.0.
 
 ## Quick start
 

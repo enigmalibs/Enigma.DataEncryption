@@ -6,7 +6,7 @@
        IServiceCollection for AddEnigmaDataEncryption. System.Buffers and PolySharp are the
        netstandard2.0-support pair and are referenced ONLY under that TFM in the library csproj. -->
   <ItemGroup>
-    <PackageVersion Include="Enigma.Core" Version="1.0.0" />
+    <PackageVersion Include="Enigma.Core" Version="1.1.0" />
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="9.0.18" />
     <PackageVersion Include="System.Buffers" Version="4.6.1" />
     <PackageVersion Include="PolySharp" Version="1.16.0" />
@@ -17,11 +17,18 @@
        runner, so it is kept only for a VSTest-based IDE runner and is not what produces the figure.
        Microsoft.Extensions.DependencyInjection is the concrete container, needed only to build a real
        ServiceProvider in the DI tests — the library itself depends on the Abstractions alone, and this
-       reference must never migrate into it. Version-matched to the Abstractions pin above. -->
+       reference must never migrate into it. Version-matched to the Abstractions pin above.
+
+       Microsoft.Testing.Extensions.CodeCoverage is capped at the 18.0.x line on purpose: 18.1.0 and later
+       depend on Microsoft.Testing.Platform 2.x, while xunit.v3 3.2.2 is an MTP *v1* host (it ships
+       xunit.v3.core.mtp-v1 and pulls Microsoft.Testing.Platform.MSBuild 1.9.1). Pairing the two loads MTP
+       2.x under an MTP 1.x extension and the test host dies at startup with a TypeLoadException on
+       IDataConsumer — zero tests run, both TFMs, no build warning. Do not bump it past 18.0.6 until
+       xunit.v3 has a stable MTP v2 release (4.x, prerelease as of 2026-08-01). -->
   <ItemGroup>
     <PackageVersion Include="xunit.v3" Version="3.2.2" />
-    <PackageVersion Include="coverlet.collector" Version="6.0.4" />
-    <PackageVersion Include="Microsoft.Testing.Extensions.CodeCoverage" Version="18.0.4" />
+    <PackageVersion Include="coverlet.collector" Version="10.0.1" />
+    <PackageVersion Include="Microsoft.Testing.Extensions.CodeCoverage" Version="18.0.6" />
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="9.0.18" />
   </ItemGroup>
 </Project>

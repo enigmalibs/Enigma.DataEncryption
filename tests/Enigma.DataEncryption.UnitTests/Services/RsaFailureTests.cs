@@ -228,9 +228,15 @@ public sealed class RsaFailureTests(RsaKeyFixture keys)
     {
         byte[] container = await RsaTestData.EncryptToBytesAsync(keys.PublicKeyPem, RsaTestData.Plaintext(64));
 
-        // Base64 that is not Base64: the platform's decoder rejects it before any key exists.
-        await Assert.ThrowsAsync<FormatException>(
+        // Base64 that is not Base64. Under Enigma.Core 1.0.0 (BouncyCastle 2.6.2) the platform decoder's
+        // FormatException escaped raw; Enigma.Core 1.1.0 (BouncyCastle 2.7.0) has PemReader wrap it in an
+        // IOException, which Enigma.Core maps to ArgumentException. Both are §9 outcomes — this pins which
+        // one, so the next drift is a red test. The FormatException is still there, nested below.
+        ArgumentException malformed = await Assert.ThrowsAsync<ArgumentException>(
             () => RsaTestData.DecryptToBytesAsync(RsaTestData.MalformedPem, container));
+
+        Assert.Equal("privateKeyPem", malformed.ParamName);
+        Assert.NotNull(RsaTestData.FirstFormatException(malformed));
 
         // Text that is not a PEM, and a PEM that holds the wrong kind of key.
         foreach (string pem in new[] { RsaTestData.NotAPem, keys.PublicKeyPem })
@@ -248,9 +254,14 @@ public sealed class RsaFailureTests(RsaKeyFixture keys)
     {
         byte[] plaintext = RsaTestData.Plaintext(64);
 
-        await Assert.ThrowsAsync<FormatException>(
+        // As above: invalid Base64 became an ArgumentException in Enigma.Core 1.1.0 (BouncyCastle 2.7.0),
+        // where 1.0.0 (BouncyCastle 2.6.2) let a raw FormatException escape. §9 permits both.
+        ArgumentException malformed = await Assert.ThrowsAsync<ArgumentException>(
             () => RsaTestData.EncryptToBytesAsync(
                 "-----BEGIN PUBLIC KEY-----\nnot base64!!\n-----END PUBLIC KEY-----\n", plaintext));
+
+        Assert.Equal("publicKeyPem", malformed.ParamName);
+        Assert.NotNull(RsaTestData.FirstFormatException(malformed));
 
         // A private-key PEM where a public one belongs, and whitespace that our own emptiness check lets
         // through — both are Enigma.Core's to reject.

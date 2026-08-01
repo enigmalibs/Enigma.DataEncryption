@@ -347,9 +347,16 @@ public sealed class HybridFailureTests(HybridKeyFixture keys)
             keys.RsaPublicKeyPem, keys.MLKemPublicKey(Default), HybridTestData.Plaintext(64),
             Cipher.Aes256Gcm, Default);
 
-        await Assert.ThrowsAsync<FormatException>(
+        // Base64 that is not Base64. Under Enigma.Core 1.0.0 (BouncyCastle 2.6.2) the platform decoder's
+        // FormatException escaped raw; Enigma.Core 1.1.0 (BouncyCastle 2.7.0) has PemReader wrap it in an
+        // IOException, which Enigma.Core maps to ArgumentException. Both are §9 outcomes — this pins which
+        // one, so the next drift is a red test. The FormatException is still there, nested below.
+        ArgumentException malformed = await Assert.ThrowsAsync<ArgumentException>(
             () => HybridTestData.DecryptToBytesAsync(
                 RsaTestData.MalformedPem, keys.MLKemPrivateKey(Default), container));
+
+        Assert.Equal("privateKeyPem", malformed.ParamName);
+        Assert.NotNull(RsaTestData.FirstFormatException(malformed));
 
         foreach (string pem in new[] { RsaTestData.NotAPem, keys.RsaPublicKeyPem })
         {
@@ -375,10 +382,16 @@ public sealed class HybridFailureTests(HybridKeyFixture keys)
 
         // An unusable RSA public key is Enigma.Core's to reject, and it propagates unwrapped — so the name
         // is Enigma.Core's too. See AnUnparseableRsaPrivateKeyPemPropagatesUnwrapped.
-        await Assert.ThrowsAsync<FormatException>(
+        // Invalid Base64 became an ArgumentException in Enigma.Core 1.1.0 (BouncyCastle 2.7.0), where 1.0.0
+        // (BouncyCastle 2.6.2) let a raw FormatException escape. §9 permits both; the name is Enigma.Core's
+        // either way.
+        ArgumentException malformed = await Assert.ThrowsAsync<ArgumentException>(
             () => HybridTestData.EncryptToBytesAsync(
                 "-----BEGIN PUBLIC KEY-----\nnot base64!!\n-----END PUBLIC KEY-----\n",
                 keys.MLKemPublicKey(Default), plaintext, Cipher.Aes256Gcm, Default));
+
+        Assert.Equal("publicKeyPem", malformed.ParamName);
+        Assert.NotNull(RsaTestData.FirstFormatException(malformed));
 
         ArgumentException rsa = await Assert.ThrowsAsync<ArgumentException>(
             () => HybridTestData.EncryptToBytesAsync(

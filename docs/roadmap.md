@@ -29,9 +29,9 @@ Status vocabulary: `TODO`, `IN PROGRESS`, `DONE`, `ABANDONED`.
 | - PHASE03    | Test-suite quality & coverage gaps                         | TODO   | (in FEATURE-F612.md)      |
 | - PHASE04    | Public API, documentation & packaging                      | TODO   | (in FEATURE-F612.md)      |
 | - PHASE05    | Synthesis, severity calibration & triage handoff           | TODO   | (in FEATURE-F612.md)      |
-| FEATURE-4A67 | Enigma.Core 1.1.0 upgrade & v1.1.0 release                  | TODO   | docs/plan/FEATURE-4A67.md |
-| - PHASE01    | Upgrade to Enigma.Core 1.1.0 & verify                      | TODO   | (in FEATURE-4A67.md)      |
-| - PHASE02    | Release v1.1.0                                             | TODO   | (in FEATURE-4A67.md)      |
+| FEATURE-4A67 | Enigma.Core 1.1.0 upgrade & v1.1.0 release                  | DONE   | docs/plan/FEATURE-4A67.md |
+| - PHASE01    | Upgrade to Enigma.Core 1.1.0 & verify                      | DONE   | (in FEATURE-4A67.md)      |
+| - PHASE02    | Release v1.1.0                                             | DONE   | (in FEATURE-4A67.md)      |
 
 ## Notes on ordering
 
@@ -55,19 +55,25 @@ ran second, it inherited the job of narrowing §4's fixed-parameter row, which b
 wrap too. It did narrow it: that row is now normative for method `0x05` alone, whose OAEP-SHA-256 wrap stays
 fixed, and method `0x03` points at §3.3 instead. `docs/done/FEATURE-0D64.md` records the rest.
 
-`FEATURE-F612` is last because it audits **the code that ships**: a method or a header field landing
-after the audit is a construction nobody reviewed. Its own output is not the end of the sequence — the
-report feeds an `/interview` run that mints a `CODE-REVIEW-HHHH` item (one severity-ordered phase per
-finding), and **v1.0.0 is published only after that item's triage**. `FEATURE-07DA` prepared the release
-and `docs/RELEASE.md` is the runbook; the maintainer runs it at the end of that chain, not before.
+`FEATURE-F612` is positioned after the format items because it audits **the code that ships**: a method or a
+header field landing after the audit is a construction nobody reviewed. Its own output is not the end of the
+sequence — the report feeds an `/interview` run that mints a `CODE-REVIEW-HHHH` item (one severity-ordered
+phase per finding). **It is not a gate on publication: v1.0.0 shipped on 2026-07-31**, before the audit
+completed, and the `CODE-REVIEW` item's fixes ship in a later 1.x. `FEATURE-07DA` prepared the release and
+`docs/RELEASE.md` is the runbook the maintainer runs for each version.
 
-Both **format** items — `FEATURE-5A30` and `FEATURE-0D64` — were cheap because **v1.0.0 is prepared but not
-published**, so no container existed outside this repository and the `0x05` and `0x03` header shapes could
-change with no format-version bump. The entire cost was regenerating committed fixtures. Both spent that
-window and both are now closed: `5A30` claimed the reserved `0x05` method byte and added a header shape and
-three fixtures; `0D64` grew the `0x03` header by one byte at offset 5, moving every offset past 4 and
-regenerating two fixtures plus two new ones. Format version stayed `0x10` throughout. **Publishing closes
-the window** — a further header change would cost a version bump or a second method byte.
+Both **format** items — `FEATURE-5A30` and `FEATURE-0D64` — were cheap because at the time **v1.0.0 was
+prepared but not yet published**, so no container existed outside this repository and the `0x05` and `0x03`
+header shapes could change with no format-version bump. The entire cost was regenerating committed fixtures.
+`5A30` claimed the reserved `0x05` method byte and added a header shape and three fixtures; `0D64` grew the
+`0x03` header by one byte at offset 5, moving every offset past 4 and regenerating two fixtures plus two new
+ones. Format version stayed `0x10` throughout.
+
+**That window is now closed. v1.0.0 was published to nuget.org on 2026-07-31** and is tagged bare `1.0.0`,
+so containers exist outside this repository and **a further header change would cost a format-version bump
+or a second method byte**. The 24 committed fixtures became the cross-version compatibility evidence the
+moment they shipped: `FEATURE-4A67` PHASE01 proved the BouncyCastle 2.7.0 upgrade byte-compatible by
+requiring every one of them to pass unmodified.
 (`FEATURE-F612` has neither a header shape nor fixtures; what makes *its* timing matter is only that it must
 audit the code that ships.)
 
