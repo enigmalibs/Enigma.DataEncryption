@@ -47,8 +47,9 @@ git pull
 ## 3. Tag the release
 
 Match the repo's existing tag convention — run `git tag` to see how prior releases were tagged (bare
-`X.Y.Z` vs. `vX.Y.Z`). This family uses **bare `X.Y.Z`** (Enigma.Core `1.0.0`, the predecessor `1.2.0`),
-which is also the default when a repo has no tags yet. Tag the merge commit and push the tag:
+`X.Y.Z` vs. `vX.Y.Z`). This repository uses **bare `X.Y.Z`** — its own `1.0.0`
+tag is the precedent, and the rest of the family agrees (Enigma.Core `1.0.0`/`1.1.0`, the predecessor
+`1.2.0`). Tag the merge commit and push the tag:
 
 ```bash
 git tag X.Y.Z

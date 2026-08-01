@@ -4,9 +4,12 @@ Guidance for Claude Code (and other AI agents) working in this repository.
 
 ## Current state
 
-**The five implemented methods are functionally complete. One planned item now stands between the
-library and the release** — `FEATURE-F612` (a full adversarial audit, whose findings become a
-`CODE-REVIEW` item). See *Dev workflow* below; `docs/roadmap.md` is authoritative. `FEATURE-67FD` stood up the git
+**The five implemented methods are functionally complete, and the library is published.** **v1.0.0 shipped
+to nuget.org on 2026-07-31**; `FEATURE-4A67` then moved it to Enigma.Core 1.1.0 (BouncyCastle 2.7.0) and
+prepared **v1.1.0**, which the maintainer tags and publishes from `docs/RELEASE.md`. `FEATURE-F612` (a full
+adversarial audit, whose findings become a `CODE-REVIEW` item) is a **post-release** audit running
+alongside, not a gate on shipping — its fixes land in a later 1.x.
+See *Dev workflow* below; `docs/roadmap.md` is authoritative. `FEATURE-67FD` stood up the git
 repo, the root configuration, the multi-targeted library and an MTP-native xUnit v3 test project.
 `FEATURE-00E7` then added the normative format spec (`docs/format.md`) and the **complete public API
 surface** — enums, constants, limits, the header record, the exception hierarchy, five service interfaces
@@ -67,6 +70,15 @@ undecryptable private-key PEM identically**, so `docs/format.md` §9 now wraps b
 `DataDecryptionException` (cause preserved as `InnerException`) and reserves the propagate-unwrapped rule
 for PEMs that cannot be *parsed* (`ArgumentException` / `FormatException`). Do not try to re-split them by
 message text.
+
+**§9 permits both of those types, but only one of them actually fires now.** `FEATURE-4A67` moved the
+library to Enigma.Core 1.1.0 / BouncyCastle 2.7.0, whose PEM reader wraps a Base64 decode failure in an
+`IOException` — which Enigma.Core maps to `ArgumentException`. So an unparseable PEM raises
+**`ArgumentException`** in every case, including the invalid-Base64 one that used to escape as a bare
+`FormatException`; the `FormatException` survives nested inside it. §9 was deliberately **not** narrowed
+(re-widening it later would itself be a documented format change), so read it as *what is permitted*, not
+as *what happens*. The four tests in `RsaFailureTests` / `HybridFailureTests` pin the current branch, so
+the next drift here is a red test rather than a surprise.
 
 **PHASE04 hit the same wall and applied the same rule, so §9 is now asymmetric between the two ML-KEM
 directions on purpose.** `Decapsulate` raises one `CryptographicException` for a malformed private key, a key
@@ -231,8 +243,8 @@ no UI or CLI project, now or ever.
   Enigma.Core is excluded.
 - Test project targets **`net8.0;net10.0`**. `netstandard2.0` is never a test TFM; its polyfill surface
   is exercised through the `net8.0` paths.
-- Runtime dependencies: **Enigma.Core 1.0.0** and
-  **Microsoft.Extensions.DependencyInjection.Abstractions 9.0.18** (all TFMs).
+- Runtime dependencies: **Enigma.Core 1.1.0** (which puts the transitive **BouncyCastle.Cryptography**
+  floor at **2.7.0**) and **Microsoft.Extensions.DependencyInjection.Abstractions 9.0.18** (all TFMs).
 - `System.Buffers` and **PolySharp** (compile-only, `PrivateAssets=all`) are referenced on
   **netstandard2.0 only** — referencing `System.Buffers` on net8.0+ raises NU1510 and fails the
   zero-warnings build. PolySharp is what makes `init`/`required` members and the nullable-analysis
@@ -308,21 +320,27 @@ Each unit of work gets its own branch (`feature/…`, `bugfix/…`, `review/…`
 plan's acceptance criteria are met, the roadmap/plan statuses are updated, and the completion doc is
 written. Commits are left to the maintainer.
 
-The sequence is a hard dependency chain: `FEATURE-67FD` (done) → `FEATURE-00E7` (done — format spec +
+The sequence was a hard dependency chain: `FEATURE-67FD` (done) → `FEATURE-00E7` (done — format spec +
 API skeleton) → `FEATURE-11B6` (done — all five phases) → `FEATURE-07DA` (done — all four phases; the
-package, the docs and the runbook are prepared) → `FEATURE-5A30` (done — hybrid method `0x05`) →
-`FEATURE-0D64` (done — selectable RSA-OAEP hash) → **`FEATURE-F612`** (adversarial audit, report only) →
-the **`CODE-REVIEW`** item minted from that report → the maintainer runs `docs/RELEASE.md`.
+package, the docs and the runbook) → `FEATURE-5A30` (done — hybrid method `0x05`) → `FEATURE-0D64`
+(done — selectable RSA-OAEP hash) → **v1.0.0 published** → `FEATURE-4A67` (Enigma.Core 1.1.0 + v1.1.0).
+`FEATURE-F612` (adversarial audit, report only) runs alongside, and the **`CODE-REVIEW`** item its report
+mints ships in a later 1.x.
 
-**v1.0.0 is prepared but *not published*, and the release now waits on `FEATURE-F612` and the
-`CODE-REVIEW` item its report mints** — do not treat the library as one step from shipping.
+**v1.0.0 was published to nuget.org on 2026-07-31** and is tagged bare **`1.0.0`**. The library is a
+released package, not a pre-release one, and `docs/RELEASE.md` is the runbook the maintainer runs for each
+subsequent version.
 
-**Both format items have now spent the pre-publication window, and it is the last one.** That no container
-exists outside this repository is what let `FEATURE-5A30` add a header shape and three fixtures, and
-`FEATURE-0D64` move every `0x03` offset past 4, each for nothing but the cost of generating fixtures — both
-with format version staying `0x10`. Publishing closes that window: a further header change would cost a
-version bump or a second method byte. `FEATURE-F612` is deliberately **last**, so it audits the code that
-actually ships, and it is under a hard code freeze — it writes findings to `docs/review/`, fixes nothing.
+**The pre-publication format window is CLOSED.** While it was open, no container existed outside this
+repository, which is what let `FEATURE-5A30` add a header shape and three fixtures, and `FEATURE-0D64` move
+every `0x03` offset past 4, each for nothing but the cost of regenerating fixtures — both with format
+version staying `0x10`. Publishing closed it. **A further header change now costs a format-version bump or
+a new method byte**, and every change must keep the 24 committed 1.0.0-era fixtures decrypting unmodified —
+they are the cross-version compatibility evidence, and `FEATURE-4A67` PHASE01 used them exactly that way.
+
+`FEATURE-F612` is **not** a gate on a first publication — that already happened. It is a post-release audit,
+still under a hard code freeze: it writes findings to `docs/review/` and fixes nothing. Its report mints a
+`CODE-REVIEW` item whose fixes ship in a later 1.x.
 
 `FEATURE-136E` (legacy decrypt) is **`ABANDONED`** — the predecessor-file migration need never
 materialized — though format versions `0x01`–`0x0F` stay reserved, so it could return as a new item

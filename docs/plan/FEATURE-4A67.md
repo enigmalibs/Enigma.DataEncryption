@@ -1,6 +1,6 @@
 # FEATURE-4A67 — Enigma.Core 1.1.0 upgrade & v1.1.0 release
 
-**Status:** IN PROGRESS (multi-phase)
+**Status:** DONE (multi-phase)
 **Type:** FEATURE (multi-phase, 2 phases)
 **Branch (per phase, at build time):** `feature/feature-4a67-phaseNN-<slug>` — one branch per phase,
 cut from the current `HEAD`.
@@ -304,7 +304,7 @@ Standard `dev-workflow` DoD:
 
 ## PHASE02 — Release v1.1.0
 
-**Status:** TODO
+**Status:** DONE — see `docs/done/FEATURE-4A67-PHASE02.md`
 **Branch:** `feature/feature-4a67-phase02-release-110`
 
 Follows `dotnet-release`'s **routine release** path (a published version already exists): version, notes,
