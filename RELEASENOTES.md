@@ -1,3 +1,41 @@
+# Enigma.DataEncryption v1.1.0 Release Notes
+
+A dependency release. Enigma.DataEncryption now builds on **Enigma.Core 1.1.0**, which raises the
+**BouncyCastle.Cryptography** floor to **2.7.0**. No public API was added, removed or changed, and the
+container format is untouched — every container written by 1.0.0 decrypts unchanged. One observable
+behaviour changed as a consequence of the upgrade, and it is spelled out under *Compatibility*.
+
+## Dependencies
+
+- **Enigma.Core 1.0.0 → 1.1.0** — which raises **BouncyCastle.Cryptography 2.6.2 → 2.7.0** transitively.
+  This is the reason for the release: Enigma.Core supplies every cryptographic primitive this library uses,
+  and its own 1.1.0 was published to pick up BouncyCastle 2.7.0.
+- **`Microsoft.Extensions.DependencyInjection.Abstractions` held at 9.0.18**, deliberately. Bumping it would
+  raise a second consumer-visible dependency floor in a release whose purpose is the BouncyCastle move.
+- Test-only tooling, **not redistributed** and therefore not part of the package's dependency floors:
+  `coverlet.collector` 6.0.4 → 10.0.1, and `Microsoft.Testing.Extensions.CodeCoverage` 18.0.4 → 18.0.6.
+
+## Compatibility
+
+- **No public API was added, removed or changed.** No type, member, parameter or default moved.
+- **Target frameworks are unchanged** — `netstandard2.0`, `net8.0` and `net10.0`. None was added or dropped.
+- **The minimum `BouncyCastle.Cryptography` is now 2.7.0.** Consumers pinned to 2.6.x must upgrade. This is
+  the one consumer-visible floor this release moves, and it is why the version is 1.1.0 rather than a patch.
+- **The container format is unchanged** — format version `0x10`, every header shape byte-for-byte identical,
+  every constant the same. **Containers written by 1.0.0 decrypt unchanged**, verified against the 24
+  containers committed as test fixtures under 1.0.0 / BouncyCastle 2.6.2, every one of which passes
+  unmodified under 2.7.0.
+- **Behaviour change — an unparseable PEM's exception type.** A PEM whose Base64 body is invalid now raises
+  **`ArgumentException`**, naming the offending parameter, where 1.0.0 raised a bare **`FormatException`**.
+  BouncyCastle 2.7.0's PEM reader wraps the decoder's failure in an `IOException`, which Enigma.Core maps to
+  `ArgumentException`; the original `FormatException` is preserved as a nested inner exception. This affects
+  the RSA and hybrid methods, on both the encrypt and decrypt sides.
+
+  **The documented contract is unchanged.** `docs/format.md` §9 has always permitted *either*
+  `ArgumentException` or `FormatException` for a PEM that cannot be parsed — only which branch fires has
+  changed, so this is not a breaking change. Code that catches `ArgumentException` (or both) is unaffected;
+  code that catches `FormatException` alone should be widened.
+
 # Enigma.DataEncryption v1.0.0 Release Notes
 
 The first public release of **Enigma.DataEncryption** — a .NET library that encrypts arbitrary data and

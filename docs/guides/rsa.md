@@ -195,6 +195,7 @@ written** to the output stream:
 using System;
 using System.IO;
 using System.Threading.Tasks;
+using Enigma.Core.Asymmetric.PublicKey;
 using Enigma.DataEncryption;
 
 try
@@ -259,8 +260,9 @@ finally
 Two things are worth knowing about the failure modes here, and they are not symmetric:
 
 - A PEM the library **cannot parse at all** is a credential-supply error, and Enigma.Core's exception
-  propagates **unwrapped** — `ArgumentException`, or `FormatException` where the Base64 is invalid. It
-  says nothing about the container.
+  propagates **unwrapped** as `ArgumentException` — invalid Base64 included, which Enigma.Core 1.1.0
+  reports that way rather than as the bare `FormatException` 1.0.0 raised, keeping the `FormatException`
+  as an inner exception. It says nothing about the container.
 - A PEM that parses but **does not open the container** — the wrong key pair, or an encrypted PEM with a
   wrong or missing `keyPassword` — surfaces as `DataDecryptionException`, with the underlying exception
   preserved as `InnerException`. Enigma.Core reports "wrong private key" and "cannot decrypt this PEM"
@@ -300,9 +302,11 @@ catch (ArgumentException ex)
 ```
 
 `DataEncryptionFormatException` and `DataDecryptionException` both derive from
-`DataEncryptionException`, so catch that instead when the distinction does not matter. Note that
-`FormatException` — the other unparseable-PEM outcome — is not an `ArgumentException`, so catch it too if
-you accept PEM text from an untrusted source.
+`DataEncryptionException`, so catch that instead when the distinction does not matter. The
+`ArgumentException` clause covers every unparseable PEM against Enigma.Core 1.1.0; the format
+specification still permits a bare `FormatException`, which is not an `ArgumentException`, so add a clause
+for it too if you accept PEM text from an untrusted source and want to stay robust across Enigma.Core
+versions.
 
 ### Bound the wrapped-key length
 
@@ -342,6 +346,7 @@ using System;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
+using Enigma.Core.Asymmetric.PublicKey;
 using Enigma.DataEncryption;
 
 IRsaDataEncryptionService service = new RsaDataEncryptionService();

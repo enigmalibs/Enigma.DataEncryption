@@ -229,4 +229,29 @@ internal static class RsaTestData
 
     /// <summary>Text that is not a PEM at all.</summary>
     internal const string NotAPem = "definitely not a PEM";
+
+    /// <summary>
+    /// Walks an exception's <see cref="Exception.InnerException"/> chain looking for the
+    /// <see cref="FormatException"/> the Base64 decoder raises.
+    /// </summary>
+    /// <param name="exception">The exception Enigma.Core surfaced.</param>
+    /// <returns>The nested <see cref="FormatException"/>, or <see langword="null"/> if the chain holds none.</returns>
+    /// <remarks>
+    /// The depth is walked rather than indexed because it is BouncyCastle's, not ours: 2.7.0 nests the
+    /// decoder's failure inside an <see cref="IOException"/> before Enigma.Core maps that to an
+    /// <see cref="ArgumentException"/>, and a future version could add or drop a layer without changing the
+    /// outcome the format spec cares about.
+    /// </remarks>
+    internal static FormatException? FirstFormatException(Exception exception)
+    {
+        for (Exception? current = exception; current is not null; current = current.InnerException)
+        {
+            if (current is FormatException format)
+            {
+                return format;
+            }
+        }
+
+        return null;
+    }
 }

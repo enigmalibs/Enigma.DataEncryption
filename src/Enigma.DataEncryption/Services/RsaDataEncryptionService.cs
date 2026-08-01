@@ -280,8 +280,10 @@ public sealed class RsaDataEncryptionService : IRsaDataEncryptionService
     /// they cannot be told apart without matching on message text. They are therefore all wrapped, with
     /// the original kept as <see cref="Exception.InnerException"/> — which is where the specific cause
     /// remains readable (<c>docs/format.md</c> §9). A PEM that cannot be <i>parsed</i> at all still
-    /// propagates untouched, as <see cref="ArgumentException"/> or <see cref="FormatException"/>: that
-    /// distinction survives, because those types are unambiguous.
+    /// propagates untouched, as <see cref="ArgumentException"/>: that distinction survives, because the
+    /// type is unambiguous. §9 also permits <see cref="FormatException"/>, which Enigma.Core 1.1.0 no
+    /// longer raises for an invalid-Base64 PEM but keeps nested inside the
+    /// <see cref="ArgumentException"/>.
     /// </para>
     /// <para>
     /// The length check guards the one thing OAEP does not: a hostile sender holding the recipient's
